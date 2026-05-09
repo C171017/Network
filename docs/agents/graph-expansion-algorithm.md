@@ -1,6 +1,15 @@
 # Graph expansion algorithm (bounded)
 
-## Inputs
+## Stochastic multi-hop crawl (preferred for hackathon seed + backend jobs)
+
+For **random 6 of first-degree** per node, **multiple waves** (default depth 5), and **SQLite persistence**, use the shared crawler documented in [`stochastic-crawl-mechanism.md`](stochastic-crawl-mechanism.md) and implemented in `packages/crawler/`. That path is the **single mechanism** meant for:
+
+- local pre-seeding before demos, and  
+- future server-side jobs after OAuth.
+
+The sections below describe the older **star + numeric caps** approach (still valid for a minimal live API response without DB crawl).
+
+## Inputs (star-cap mode)
 
 - `rootLogin: string`
 - `maxFollowers`, `maxFollowing` (hard caps)

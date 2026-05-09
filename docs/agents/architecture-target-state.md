@@ -57,9 +57,12 @@ Returns `{ user: { login, avatarUrl, name } }` or 401.
 
 ## Deployment (typical)
 
-- **App:** Vercel / Netlify / Railway / Fly.io
-- **DB:** Neon / Supabase / Railway Postgres
-- **Env:** `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `AUTH_SECRET`, `DATABASE_URL`
+**Chosen stack (this repo):** Vite **web** + Node **API** + **Supabase** (Postgres + Auth). See [`chosen-tech-stack.md`](chosen-tech-stack.md).
+
+- **Web:** static or SSR host for Vite build (Vercel / Netlify / Cloudflare Pages / S3+CDN — TBD)
+- **API:** same platform’s serverless functions **or** Railway / Fly / Render Node process — TBD
+- **DB + auth:** **Supabase** (`DATABASE_URL`, Supabase keys; details in `chosen-tech-stack.md`)
+- **Env (minimum names):** `DATABASE_URL`, `DIRECT_URL` (if used for migrations), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, server-only `SUPABASE_SERVICE_ROLE_KEY` where justified, plus GitHub/Supabase auth configuration per `github-api-and-auth.md`
 
 ## Future extensions (do not build in v0 unless time permits)
 

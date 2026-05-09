@@ -1,8 +1,10 @@
 # Tech stack options (prototype speed vs future scale)
 
+**Locked choices for this repo:** see [`chosen-tech-stack.md`](chosen-tech-stack.md) (Vite + React + TypeScript, Supabase Postgres, Prisma-or-Drizzle, Supabase Auth GitHub, Node API server).
+
 Assumptions: **18-hour-class hackathon**, **web-first**, **GitHub OAuth**, **bounded graph**, you will keep building after.
 
-## Recommended default (balanced)
+## Recommended default (balanced) — superseded by chosen stack for this repo
 
 **Next.js (App Router) + TypeScript + React** on the frontend, **Route Handlers / server actions** for OAuth and GitHub calls, **PostgreSQL** (Neon, Supabase, or RDS) for sessions and future cache, **react-force-graph-2d** or **sigma.js** for the graph.
 
@@ -68,7 +70,7 @@ Assumptions: **18-hour-class hackathon**, **web-first**, **GitHub OAuth**, **bou
 | **Lucia + Arctic** | Lightweight, explicit | More manual wiring |
 | **Manual OAuth** | Full control | Easy to get wrong; not ideal in 18h unless you know it |
 
-Recommendation: **Auth.js** with GitHub provider unless the team strongly prefers something else.
+Recommendation (generic): **Auth.js** with GitHub provider unless the team strongly prefers something else. **This repo:** **Supabase Auth** + GitHub (`chosen-tech-stack.md`).
 
 ---
 
@@ -98,8 +100,11 @@ Recommendation: **single app** for hackathon; create `src/lib/github/` and `src/
 
 | Decision | Choice | Date | Rationale |
 |----------|--------|------|-----------|
-| Web framework | TBD | | |
-| Graph library | TBD | | |
-| DB | TBD | | |
-| Auth library | TBD | | |
-| Host | TBD | | |
+| Web framework | **Vite + React + TypeScript** | 2026-05-09 | Explicit client/server split; fast DX; see `chosen-tech-stack.md` |
+| API / BFF | **Node server** (Hono or Express) + TS | 2026-05-09 | Secrets and GitHub calls off the Vite bundle |
+| Graph library | **TBD** (`react-force-graph-2d` or `sigma.js`) | | Pick at graph UI phase |
+| DB | **Supabase (PostgreSQL)** | 2026-05-09 | Hosted Postgres, dashboard, auth integration |
+| ORM | **Prisma** (default) or **Drizzle** | 2026-05-09 | Migrations + typed queries for newer SQL users |
+| Auth library | **Supabase Auth** (GitHub provider) | 2026-05-09 | Cohesive with Supabase; provider token for GitHub API per implementation |
+| Host | **TBD** | | Vercel / Railway / Fly / other |
+| Package manager | **pnpm** (recommended) | 2026-05-09 | Align with `implementation-phases.md`; document override in root README if changed |

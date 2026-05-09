@@ -1,5 +1,7 @@
 # Open questions (please answer to lock architecture)
 
+**Stack (web + DB + auth shape) is locked** in [`08-chosen-tech-stack.md`](08-chosen-tech-stack.md) and [`../agents/chosen-tech-stack.md`](../agents/chosen-tech-stack.md) (Vite, React, TypeScript, Supabase Postgres, Prisma-or-Drizzle, Supabase Auth GitHub, Node API).
+
 Copy answers inline or reply in chat; we will propagate decisions into `docs/agents/`.
 
 ## Product
@@ -20,9 +22,9 @@ Copy answers inline or reply in chat; we will propagate decisions into `docs/age
 
 ## Team and ops
 
-8. **Deploy target:** Vercel, Railway, Fly.io, or “local only” for judging?
-9. **Monorepo tooling:** npm, pnpm, or bun?
+8. **Deploy target:** Vercel, Railway, Fly.io, or “local only” for judging? (Stack is chosen; **host** is still open — record in `docs/agents/chosen-tech-stack.md` when decided.)
+9. **Monorepo tooling:** npm, pnpm, or bun? (**Docs default:** pnpm — change root README and agent stack doc if you standardize on npm or bun.)
 
 ---
 
-When these are answered, the default stack recommendation in `docs/agents/tech-stack-options.md` can be narrowed to one concrete blueprint.
+When the remaining items are answered, propagate them into `docs/agents/chosen-tech-stack.md`, `architecture-target-state.md`, and any env templates in the root README.

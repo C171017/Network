@@ -12,7 +12,7 @@ Treat the **backend + domain model + GitHub integration** as the product core. T
 
 ## What to do now so mobile is not painful
 
-1. **Backend-for-frontend (BFF) or small API layer** — even if it is a single Next.js route namespace, keep “GitHub talking” logic in modules that do not assume `window`.
+1. **Backend-for-frontend (BFF) or small API layer** — with **Vite + a Node API**, keep “GitHub talking” logic in server modules that do not assume `window` (same idea as a single Next.js route namespace, but explicit).
 2. **Stable JSON shapes** for `Node`, `Edge`, `ExpansionRequest`, `ExpansionResponse` (documented in `docs/agents/data-model-and-github-mapping.md`).
 3. **Token storage** — never ship GitHub client secret to mobile; use the same server-mediated OAuth or a mobile-safe OAuth PKCE flow later.
 4. **Pagination contracts** — every list that can explode (followers) should already be cursor-based internally.

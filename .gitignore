@@ -1,1 +1,8 @@
 .DS_Store
+node_modules/
+dist/
+data/*.db
+data/*.db-wal
+data/*.db-shm
+.env
+.env.*

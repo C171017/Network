@@ -13,5 +13,7 @@ Plain language. No obligation to read the agent folder unless you want implement
 | [05-mobile-later.md](05-mobile-later.md) | Why the web-first choice and how a mobile app fits later |
 | [06-open-questions.md](06-open-questions.md) | Decisions we still need from you / the team |
 | [07-data-pull-and-storage.md](07-data-pull-and-storage.md) | How data is pulled, how much, speed, formats, DB (short version) |
+| [08-chosen-tech-stack.md](08-chosen-tech-stack.md) | Locked stack (Vite, React, TypeScript, Supabase) and your onboarding checklist |
+| [09-stochastic-crawl-and-demo-seed.md](09-stochastic-crawl-and-demo-seed.md) | Why we sample, demo seeding, one crawl for laptop + future backend |
 
 If anything here disagrees with `docs/agents/`, treat the **agents** tree as the technical source of truth until you reconcile them.

@@ -16,12 +16,15 @@ This repository splits documentation into two parallel trees so hackathon work s
 ## Suggested reading order
 
 1. [`humans/01-vision-and-scope.md`](humans/01-vision-and-scope.md)
-2. [`humans/07-data-pull-and-storage.md`](humans/07-data-pull-and-storage.md) — how we pull, how much, formats, DB in plain language
-3. [`humans/03-features.md`](humans/03-features.md)
-4. [`agents/data-pulling-storage-and-formats.md`](agents/data-pulling-storage-and-formats.md) — detailed tables, timing, format comparison
-5. [`agents/tech-stack-options.md`](agents/tech-stack-options.md) (skim tables; details when you pick a stack)
-6. [`agents/architecture-target-state.md`](agents/architecture-target-state.md)
-7. [`humans/06-open-questions.md`](humans/06-open-questions.md) — answer these to lock v0
+2. [`humans/08-chosen-tech-stack.md`](humans/08-chosen-tech-stack.md) — locked stack and onboarding checklist
+3. [`agents/chosen-tech-stack.md`](agents/chosen-tech-stack.md) — env vars, repo shape, implementation notes
+4. [`humans/07-data-pull-and-storage.md`](humans/07-data-pull-and-storage.md) — how we pull, how much, formats, DB in plain language
+5. [`humans/03-features.md`](humans/03-features.md)
+6. [`agents/data-pulling-storage-and-formats.md`](agents/data-pulling-storage-and-formats.md) — detailed tables, timing, format comparison
+6b. [`humans/09-stochastic-crawl-and-demo-seed.md`](humans/09-stochastic-crawl-and-demo-seed.md) + [`agents/stochastic-crawl-mechanism.md`](agents/stochastic-crawl-mechanism.md) — random-6 crawl, depth 5, local + server reuse
+7. [`agents/tech-stack-options.md`](agents/tech-stack-options.md) (historical tradeoffs; locked row in decision log)
+8. [`agents/architecture-target-state.md`](agents/architecture-target-state.md)
+9. [`humans/06-open-questions.md`](humans/06-open-questions.md) — remaining product/ops questions for v0
 
 ---
 

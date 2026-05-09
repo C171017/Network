@@ -1,5 +1,7 @@
 # GitHub API and authentication
 
+**This repo:** end-user sign-in uses **Supabase Auth** with the **GitHub** provider (`chosen-tech-stack.md`). The expand service still uses a **server-side** GitHub access token (from the provider session); never expose `GITHUB_CLIENT_SECRET` or long-lived tokens to the Vite client.
+
 ## OAuth scopes (minimal)
 
 For public-only prototype:

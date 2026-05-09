@@ -1,0 +1,10 @@
+{
+  "name": "network-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/crawler"
+  ],
+  "scripts": {
+    "crawl": "npm run crawl -w @network/crawler"
+  }
+}

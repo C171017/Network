@@ -2,9 +2,22 @@
 
 ## Phase D0 — Docs locked
 
-- [ ] Answers recorded for `docs/humans/06-open-questions.md`
-- [ ] `tech-stack-options.md` decision table filled
+- [x] `tech-stack-options.md` decision table filled (see also `chosen-tech-stack.md`)
+- [ ] Answers recorded for remaining items in `docs/humans/06-open-questions.md` (caps, persona, deploy host, etc.)
 - [ ] Edge direction policy chosen in `data-model-and-github-mapping.md`
+- [ ] Default pull caps aligned with `data-pulling-storage-and-formats.md` and open questions
+
+## Phase D0.5 — Stack onboarding (you / first contributor)
+
+Mirrors the checklist in `docs/humans/08-chosen-tech-stack.md`; keep one source updated.
+
+- [ ] Supabase project created; GitHub Auth provider enabled; OAuth callback URLs set
+- [ ] GitHub OAuth credentials configured (per Supabase + GitHub docs)
+- [ ] `.env` / `.env.example` wired for `DATABASE_URL`, Supabase keys, and any server secrets (`chosen-tech-stack.md`)
+- [ ] Vite + React + TypeScript app runs locally (`apps/web` or equivalent)
+- [ ] Node API server runs locally and is reachable from the web app (proxy or explicit API base URL)
+- [ ] Prisma (or Drizzle) connects to Supabase; first migration applied (pooler vs direct URL per `chosen-tech-stack.md`)
+- [ ] Sign-in flow completes in the browser; user visible in Supabase **Authentication** dashboard
 
 ## Phase D1 — Scaffold
 
