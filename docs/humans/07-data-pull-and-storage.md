@@ -1,0 +1,21 @@
+# How we get data (simple version)
+
+## Pull
+
+- The **server** calls GitHub’s **JSON** APIs over HTTPS using the user’s **OAuth** login (or a dev token). The browser does not hold your GitHub secret.
+- For each “explore this person,” we load **only a slice**: their profile plus up to **N** followers and **N** people they follow (numbers we still pick as a team). We do **not** download whole giant follower lists.
+
+## Realism and speed
+
+- With login, GitHub allows **thousands** of API calls per hour per user context — plenty for a **capped** one-hop map.
+- Without login, limits are tiny — **not** good for a public “try any username” demo unless we add caching or require sign-in.
+- A typical one-hop load is often **about one to a few seconds** on good Wi‑Fi if we keep caps modest.
+
+## Formats (plain English)
+
+- **GitHub → us:** always **JSON** over the network.
+- **Us → browser:** our own **JSON** shape (the graph package the UI draws).
+- **CSV:** not from GitHub; we’d only add CSV if **we** export data for spreadsheets (optional, later).
+- **Database:** use **SQL** (for example Postgres) for accounts and sessions; we can store a copy of a graph as **JSON inside SQL** if we want caching later.
+
+Tables, exact request counts, and storage tradeoffs: [`../agents/data-pulling-storage-and-formats.md`](../agents/data-pulling-storage-and-formats.md).
