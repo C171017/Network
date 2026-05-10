@@ -10,11 +10,11 @@ Human summary: [`../humans/08-chosen-tech-stack.md`](../humans/08-chosen-tech-st
 |----------|--------|-----------|
 | Web UI | **Vite + React + TypeScript** | Fast dev server; explicit split from API; strong TS ecosystem for graph DTOs |
 | API / BFF | **Hono** on Node (`apps/server`) | `POST /api/graph/expand` verifies Supabase JWT and calls GitHub; secrets stay off the Vite client |
-| Database | **Supabase (PostgreSQL)** | Hosted Postgres, dashboard, backups; aligns with SQL + growth path in `tech-stack-options.md` |
-| ORM | **Prisma** (default) or **Drizzle** | Prefer Prisma for minimal raw SQL early; either supports migrations against Supabase |
+| Database | **Supabase (PostgreSQL)** for auth and future app tables; **SQLite file** (`better-sqlite3`) in `apps/server` for graph read/expand in the current slice | Hosted Postgres for growth; local file keeps the hackathon vertical slice fast |
+| ORM | **Prisma** (default) or **Drizzle** (planned) | Use when wiring `DATABASE_URL` and migrations for Postgres-backed features beyond the SQLite graph file |
 | Auth | **Supabase Auth**, **GitHub** provider | Fewer moving parts than separate Auth.js for a Supabase-first stack; session JWT usable from API |
-| Graph renderer | **`react-force-graph-2d`** | First prototype shipped in `apps/web` |
-| Package manager | **pnpm** (recommended) | Matches `implementation-phases.md` acceptance wording; override in root README if the team picks npm/bun |
+| Graph renderer | **`@shopify/react-native-skia`** (CanvasKit on web) | Shipped under `apps/web/src/graph/columbia/` (`NetworkGraphSkia`, layout, gestures) |
+| Package manager | **pnpm** (recommended) | Matches `implementation-phases.md` acceptance wording; override in root README if the team picks npm/bun (**this repo uses npm workspaces** today) |
 | Host | **TBD** | Vercel / Railway / Fly / other — pick when deploying |
 
 ## Repository shape (recommended when scaffolding)
@@ -25,13 +25,13 @@ apps/
   server/       # Hono: verifies Supabase JWT; GitHub expand; no secrets in Vite bundle
 ```
 
-A flat `client/` + `server/` layout is equivalent; keep **all secrets and Prisma usage** in `server` only.
+A flat `client/` + `server/` layout is equivalent; keep **all secrets** in `server` only; keep **ORM / `DATABASE_URL` usage** in `server` only when you add Prisma or Drizzle.
 
 ## Environment variables (names only; never commit values)
 
 | Variable | Used by | Purpose |
 |----------|---------|---------|
-| `DATABASE_URL` | Prisma (runtime) | Supabase **pooled** Postgres URI (transaction mode / pooler) |
+| `DATABASE_URL` | Prisma / Drizzle (when added) | Supabase **pooled** Postgres URI (transaction mode / pooler) |
 | `DIRECT_URL` | Prisma Migrate (optional) | Supabase **direct** connection if migrations require non-pooled access |
 | `SUPABASE_URL` | Server and/or web | Supabase project URL |
 | `SUPABASE_ANON_KEY` | Web (`VITE_SUPABASE_ANON_KEY`) + server (`SUPABASE_ANON_KEY`) | Public **anon** JWT **or** newer **`sb_publishable_…`** client key from Supabase **Project Settings → API**, whichever your project exposes for browser clients |
@@ -59,7 +59,7 @@ Paths are resolved from **`import.meta.url`** (not `process.cwd()`), so `npm` / 
 
 Contributors may be new to SQL. Policy:
 
-1. Model tables in **Prisma schema** (or Drizzle); review generated SQL in logs occasionally.
+1. When you add Postgres app tables, model them in **Prisma schema** (or Drizzle); review generated SQL in logs occasionally.
 2. Use the Supabase dashboard **SQL Editor** for ad-hoc read-only learning.
 3. Add hand-written SQL only when the ORM is insufficient; document invariants in `data-model-and-github-mapping.md` or adjacent agent docs.
 

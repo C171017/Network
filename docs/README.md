@@ -32,4 +32,4 @@ This repository splits documentation into two parallel trees so hackathon work s
 
 Assume ~13 hours of build time if ~5 hours are sleep or travel. Docs here assume **documentation first**, then a **vertical slice**: login → seed graph from “me” → limited expansion → interactive graph → “set as root” / “explore by username”.
 
-**Implemented slice:** see root [`README.md`](../README.md) — Vite web + Hono API + Supabase GitHub OAuth + `react-force-graph-2d`; local env under `apps/web/.env` and `apps/server/.env`.
+**Implemented slice:** see root [`README.md`](../README.md) — Vite web + Hono API + Supabase GitHub OAuth + graph UI built with **`@shopify/react-native-skia`** (CanvasKit on web, under `apps/web/src/graph/columbia/`); graph persistence for expand/read is a **local SQLite file** on the API server (`better-sqlite3`); env under `apps/web/.env` and `apps/server/.env`.

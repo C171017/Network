@@ -7,8 +7,8 @@ This is the **human-readable** summary. Implementation details, environment vari
 | Area | Choice |
 |------|--------|
 | **UI** | **Vite** + **React** + **TypeScript** |
-| **Database** | **Supabase** (managed **PostgreSQL**) |
-| **Talking to SQL** | **Prisma** (recommended) or **Drizzle** — use an ORM first so you ship with TypeScript types and migrations; learn raw SQL in parallel |
+| **Database** | **Supabase** (managed **PostgreSQL**) for auth and the long-term app data path; **SQLite file** on the API server for the hackathon graph expand/read slice (`better-sqlite3` in `apps/server`) |
+| **Talking to SQL** | **Today:** graph nodes/edges live in SQLite via the server’s store. **Next:** **Prisma** (recommended) or **Drizzle** against Supabase Postgres when you add migrations and typed access for durable app data beyond the local graph file |
 | **Auth** | **Supabase Auth** with the **GitHub** provider (same “sign in with GitHub” story; tokens stay server-aware via Supabase’s session model — see agent doc) |
 | **API shape** | **`apps/server`** — **Hono** + `POST /api/graph/expand` (Supabase session check, then GitHub REST). Vite proxies `/api` in dev. |
 
@@ -22,7 +22,7 @@ You should still learn SQL basics over time (`SELECT`, `INSERT`, `WHERE`, `JOIN`
 
 ## Graph visualization
 
-**Locked:** **`react-force-graph-2d`** for the first interactive prototype (force layout + directional links).
+**Shipped in this repo:** **`@shopify/react-native-skia`** on the web (CanvasKit WASM) for the interactive graph — implementation under [`apps/web/src/graph/columbia/`](../../apps/web/src/graph/columbia/) (custom layout, pan/zoom, links). Alternatives such as **`react-force-graph-2d`** remain reasonable for future experiments or a simpler 2D force layout.
 
 ## Local dev (web + API)
 
@@ -35,7 +35,7 @@ See root [`README.md`](../../README.md).
 
 ### Troubleshooting (common)
 
-- **“Missing SUPABASE_URL or SUPABASE_ANON_KEY”** after **Load graph**: the **API** is missing env. Put `SUPABASE_URL` and `SUPABASE_ANON_KEY` in **`apps/server/.env`**, restart **`npm run dev:server`**.  
+- **“Missing SUPABASE_URL or SUPABASE_ANON_KEY”** when loading or expanding the graph: the **API** is missing env. Put `SUPABASE_URL` and `SUPABASE_ANON_KEY` in **`apps/server/.env`**, restart **`npm run dev:server`**.  
 - **`provider is not enabled`**: enable **Auth → Providers → GitHub** in Supabase and **Save** with GitHub Client ID + Secret.  
 - **White screen / `supabaseUrl is required`**: add **`apps/web/.env`** with `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`, restart Vite.
 

@@ -1,6 +1,6 @@
 # Open questions (please answer to lock architecture)
 
-**Stack (web + DB + auth shape) is locked** in [`08-chosen-tech-stack.md`](08-chosen-tech-stack.md) and [`../agents/chosen-tech-stack.md`](../agents/chosen-tech-stack.md) (Vite, React, TypeScript, Supabase Postgres, Prisma-or-Drizzle, Supabase Auth GitHub, Node API).
+**Stack (web + DB + auth shape) is locked** in [`08-chosen-tech-stack.md`](08-chosen-tech-stack.md) and [`../agents/chosen-tech-stack.md`](../agents/chosen-tech-stack.md) (Vite, React, TypeScript, **Supabase Auth** with GitHub, **Hono** API, **Skia** graph UI, **SQLite** graph file on the server today, **Supabase Postgres** + **Prisma or Drizzle** for future durable app tables beyond the file).
 
 Copy answers inline or reply in chat; we will propagate decisions into `docs/agents/`.
 

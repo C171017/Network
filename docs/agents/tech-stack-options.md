@@ -1,12 +1,12 @@
 # Tech stack options (prototype speed vs future scale)
 
-**Locked choices for this repo:** see [`chosen-tech-stack.md`](chosen-tech-stack.md) (Vite + React + TypeScript, Supabase Postgres, Prisma-or-Drizzle, Supabase Auth GitHub, Node API server).
+**Locked choices for this repo:** see [`chosen-tech-stack.md`](chosen-tech-stack.md) (Vite + React + TypeScript, Supabase Auth GitHub, Hono Node API, **Skia** graph UI, **SQLite** graph file on the server for v0, Supabase Postgres + Prisma-or-Drizzle when you add migrations beyond the file).
 
 Assumptions: **18-hour-class hackathon**, **web-first**, **GitHub OAuth**, **bounded graph**, you will keep building after.
 
 ## Recommended default (balanced) — superseded by chosen stack for this repo
 
-**Next.js (App Router) + TypeScript + React** on the frontend, **Route Handlers / server actions** for OAuth and GitHub calls, **PostgreSQL** (Neon, Supabase, or RDS) for sessions and future cache, **react-force-graph-2d** or **sigma.js** for the graph.
+**Next.js (App Router) + TypeScript + React** on the frontend, **Route Handlers / server actions** for OAuth and GitHub calls, **PostgreSQL** (Neon, Supabase, or RDS) for sessions and future cache, **react-force-graph-2d** or **sigma.js** for the graph. *(This repo instead ships a **Vite** SPA with **`@shopify/react-native-skia`** on web for the graph.)*
 
 **Why this default:** one deployable unit on Vercel-like hosts, clear server boundary for secrets, PostgreSQL grows cleanly into cache + user data + audit logs.
 
@@ -102,7 +102,7 @@ Recommendation: **single app** for hackathon; create `src/lib/github/` and `src/
 |----------|--------|------|-----------|
 | Web framework | **Vite + React + TypeScript** | 2026-05-09 | Explicit client/server split; fast DX; see `chosen-tech-stack.md` |
 | API / BFF | **Node server** (Hono or Express) + TS | 2026-05-09 | Secrets and GitHub calls off the Vite bundle |
-| Graph library | **TBD** (`react-force-graph-2d` or `sigma.js`) | | Pick at graph UI phase |
+| Graph library | **`@shopify/react-native-skia`** (CanvasKit web) | 2026-05-09 | Shipped under `apps/web/src/graph/columbia/`; `react-force-graph-2d` / sigma remain documented above as tradeoffs |
 | DB | **Supabase (PostgreSQL)** | 2026-05-09 | Hosted Postgres, dashboard, auth integration |
 | ORM | **Prisma** (default) or **Drizzle** | 2026-05-09 | Migrations + typed queries for newer SQL users |
 | Auth library | **Supabase Auth** (GitHub provider) | 2026-05-09 | Cohesive with Supabase; provider token for GitHub API per implementation |

@@ -8,7 +8,7 @@ Hackathon prototype: visualize **public** GitHub follow/follower relationships f
 - **Agent / codegen-oriented:** [`docs/agents/`](docs/agents/README.md)
 - **Chosen tech stack:** [`docs/humans/08-chosen-tech-stack.md`](docs/humans/08-chosen-tech-stack.md) (summary) · [`docs/agents/chosen-tech-stack.md`](docs/agents/chosen-tech-stack.md) (implementation details)
 
-**Locked stack:** Vite, React, TypeScript, **Supabase** (PostgreSQL + Auth with GitHub), **Hono** Node API server, **`react-force-graph-2d`**, **Prisma** (default) or **Drizzle** when persistence lands.
+**Locked stack:** Vite, React, TypeScript, **Supabase** (Auth with GitHub; hosted PostgreSQL for accounts and growth), **Hono** Node API server, **`@shopify/react-native-skia`** (CanvasKit) for the interactive graph in [`apps/web/src/graph/columbia/`](apps/web/src/graph/columbia/), **SQLite** (`better-sqlite3`) for the graph file the API reads and expands today, **Prisma** (default) or **Drizzle** when you add Postgres-backed app tables and migrations beyond this file.
 
 **Stochastic GitHub crawl (SQLite seed, reusable in backend later):** [`packages/crawler/README.md`](packages/crawler/README.md) · human summary [`docs/humans/09-stochastic-crawl-and-demo-seed.md`](docs/humans/09-stochastic-crawl-and-demo-seed.md).
 
@@ -30,7 +30,7 @@ npm run dev:server   # API :8787
 npm run dev          # Vite :5173, proxies /api → API
 ```
 
-Open **`http://localhost:5173`**, click **Sign in with GitHub**, then **Load graph**.
+Open **`http://localhost:5173`**, click **Sign in with GitHub**, then **Expand from GitHub** after the graph loads from SQLite.
 
 ### If the UI says “Missing SUPABASE_URL or SUPABASE_ANON_KEY”
 

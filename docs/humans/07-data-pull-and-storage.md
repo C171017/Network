@@ -16,6 +16,6 @@
 - **GitHub → us:** always **JSON** over the network.
 - **Us → browser:** our own **JSON** shape (the graph package the UI draws).
 - **CSV:** not from GitHub; we’d only add CSV if **we** export data for spreadsheets (optional, later).
-- **Database:** use **SQL** via **Supabase** (managed **PostgreSQL**) for accounts, sessions, and future cache metadata; we can store a copy of a graph as **JSON inside SQL** if we want caching later. Day-to-day access is through an **ORM** (Prisma or Drizzle) — see [`08-chosen-tech-stack.md`](08-chosen-tech-stack.md).
+- **Database:** **Supabase** covers **accounts and sessions** (Auth + hosted **PostgreSQL** for the product’s long-term path). The **live hackathon slice** stores expanded **nodes and edges in a local SQLite file** on the API server (`better-sqlite3`). Later we can mirror graph snapshots into **Postgres** (for example **JSONB**) and use an **ORM** (Prisma or Drizzle) for typed access — see [`08-chosen-tech-stack.md`](08-chosen-tech-stack.md).
 
 Tables, exact request counts, and storage tradeoffs: [`../agents/data-pulling-storage-and-formats.md`](../agents/data-pulling-storage-and-formats.md).

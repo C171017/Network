@@ -1,6 +1,6 @@
 import type { GraphDTO } from '../../lib/graphApi'
 
-/** Shape expected by the Columbia-style D3 graph (`id` + numeric link endpoints). */
+/** Shape expected by the Skia graph (`id` + numeric link endpoints). */
 export type VisualizationGraphData = {
   nodes: Array<Record<string, unknown> & { id: number }>
   links: Array<{ source: number; target: number }>

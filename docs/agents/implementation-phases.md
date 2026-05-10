@@ -33,7 +33,7 @@ Mirrors the checklist in `docs/humans/08-chosen-tech-stack.md`; keep one source 
 
 ## Phase D3 — UI
 
-- [x] Graph renders from DTO (`react-force-graph-2d`)
+- [x] Graph renders from DTO (`@shopify/react-native-skia` / CanvasKit web — `apps/web/src/graph/columbia/`)
 - [ ] Node selection + side panel (not built yet)
 - [x] Explore by username via **Root GitHub login** input + load
 - [ ] Dedicated rate-limit / retry UI (errors surface as banner text today)

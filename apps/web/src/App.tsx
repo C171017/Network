@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import NetworkGraph from './components/NetworkGraph'
-import { graphDtoToForceData, type GraphData } from './graph/graphDto'
+import { graphDtoToVisualizationData, type VisualizationGraphData } from './graph/columbia/graphAdapter'
 import { expandGraph, fetchPublicGraph, fetchReachableGraph } from './lib/graphApi'
 import { supabase, isSupabaseConfigured } from './lib/supabase'
 import './App.css'
@@ -33,7 +33,7 @@ export default function App() {
   const [graphError, setGraphError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [graphLoading, setGraphLoading] = useState(true)
-  const [graph, setGraph] = useState<GraphData | null>(null)
+  const [graph, setGraph] = useState<VisualizationGraphData | null>(null)
   const [rootOverride, setRootOverride] = useState('')
 
   useEffect(() => {
@@ -99,12 +99,12 @@ export default function App() {
     try {
       if (!session) {
         const dto = await fetchPublicGraph()
-        setGraph(graphDtoToForceData(dto))
+        setGraph(graphDtoToVisualizationData(dto))
       } else {
         const dto = await fetchReachableGraph({
           supabaseAccessToken: session.supabaseAccessToken,
         })
-        setGraph(graphDtoToForceData(dto))
+        setGraph(graphDtoToVisualizationData(dto))
       }
     } catch (e) {
       setGraph(null)
