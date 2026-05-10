@@ -2,6 +2,19 @@ body {
   margin: 0;
   background: #000;
   color: #e2e8f0;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+}
+
+img {
+  -webkit-user-drag: none;
+}
+
+input,
+textarea {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .app-root-full {
