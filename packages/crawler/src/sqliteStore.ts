@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import type { GithubPublicUser, GithubUserSlim } from "./types.js";
+import { expandProfileRecord, type GithubProfileAugments } from "./profileAugment.js";
 
 function ensureProfileJsonColumn(db: Database.Database): void {
   const cols = db.prepare(`PRAGMA table_info(nodes)`).all() as Array<{ name: string }>;
@@ -83,9 +84,10 @@ export function markExpandedFullProfile(
   db: Database.Database,
   user: GithubPublicUser,
   depth: number,
+  augments?: GithubProfileAugments,
 ): void {
   const now = new Date().toISOString();
-  const profileJson = JSON.stringify(user);
+  const profileJson = JSON.stringify(expandProfileRecord(user, augments));
   const stmt = db.prepare(`
     INSERT INTO nodes (
       github_id, login, depth, expanded, avatar_url, name, bio, company, location, blog, html_url, profile_json, updated_at

@@ -68,8 +68,8 @@ export async function runStochasticCrawl(
       expandedLogins.add(login);
       stats.expansions += 1;
 
-      const subject = await gh.getUser(login);
-      markExpandedFullProfile(db, subject, depth);
+      const { user: subject, social_accounts, organizations } = await gh.getUserExpanded(login);
+      markExpandedFullProfile(db, subject, depth, { social_accounts, organizations });
 
       const picks = await sampleRandomFirstDegreeNeighbors(
         gh,

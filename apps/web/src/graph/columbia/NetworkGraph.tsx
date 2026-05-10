@@ -43,6 +43,8 @@ const PROFILE_HOVER_PRIORITY = [
   'blog',
   'email',
   'twitter_username',
+  'social_accounts',
+  'organizations',
   'hireable',
   'public_repos',
   'public_gists',

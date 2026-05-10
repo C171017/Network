@@ -1,5 +1,10 @@
 import type { Database } from "better-sqlite3";
-import type { GithubPublicUser } from "@network/crawler";
+import {
+  expandProfileRecord,
+  type GithubPublicOrganization,
+  type GithubPublicUser,
+  type GithubSocialAccount,
+} from "@network/crawler";
 import { githubProfilePageUrl } from "./githubProfileUrl.js";
 import type { EdgeDTO, GraphDTO, NodeDTO } from "./graphTypes.js";
 import { persistFollowsEdge, persistNode, type NodeRowInput } from "./graphStore.js";
@@ -46,6 +51,34 @@ async function ghFetch<T>(token: string, path: string): Promise<T> {
     throw new Error(`GitHub ${res.status} ${path}: ${await res.text()}`);
   }
   return (await res.json()) as T;
+}
+
+const MAX_PUBLIC_LIST_PAGES = 10;
+
+async function ghFetchAllPages<T>(token: string, pathWithoutQuery: string): Promise<T[]> {
+  const out: T[] = [];
+  for (let page = 1; page <= MAX_PUBLIC_LIST_PAGES; page++) {
+    const chunk = await ghFetch<T[]>(token, `${pathWithoutQuery}?per_page=100&page=${page}`);
+    if (!chunk.length) break;
+    out.push(...chunk);
+    if (chunk.length < 100) break;
+  }
+  return out;
+}
+
+/**
+ * Public supplemental data merged into `profile_json` (alongside full `GET /users/{login}` payload).
+ */
+async function fetchProfileAugments(token: string, login: string): Promise<{
+  social_accounts: GithubSocialAccount[];
+  organizations: GithubPublicOrganization[];
+}> {
+  const enc = encodeURIComponent(login);
+  const [social_accounts, organizations] = await Promise.all([
+    ghFetchAllPages<GithubSocialAccount>(token, `/users/${enc}/social_accounts`),
+    ghFetchAllPages<GithubPublicOrganization>(token, `/users/${enc}/orgs`),
+  ]);
+  return { social_accounts, organizations };
 }
 
 function hasPresent(s: string | null | undefined): boolean {
@@ -202,8 +235,14 @@ async function collectNeighborsFromSide(
   return { selected: selected.slice(0, target), pagesFetched, enriched };
 }
 
-function toNode(user: GithubPublicUser, isRoot: boolean, depth: number, expanded: 0 | 1): NodeDTO {
-  const profile = { ...(user as object) } as Record<string, unknown>;
+function toNode(
+  user: GithubPublicUser,
+  isRoot: boolean,
+  depth: number,
+  expanded: 0 | 1,
+  augments?: { social_accounts: GithubSocialAccount[]; organizations: GithubPublicOrganization[] },
+): NodeDTO {
+  const profile = expandProfileRecord(user, augments);
   return {
     githubId: user.id,
     login: user.login,
@@ -248,11 +287,12 @@ async function mergeNeighborFromGithub(
   const full =
     sideEnriched.get(raw.id) ??
     (await ghFetch<GithubPublicUser>(token, `/users/${encodeURIComponent(raw.login)}`));
+  const augments = await fetchProfileAugments(token, full.login);
   const prev = nodeById.get(full.id);
   const depth = prev ? Math.min(prev.depth, hopDepth + 1) : hopDepth + 1;
   const expanded: 0 | 1 = prev?.expanded ?? 0;
   const isRoot = prev?.isRoot ?? false;
-  return toNode(full, isRoot, depth, expanded);
+  return toNode(full, isRoot, depth, expanded, augments);
 }
 
 /**
@@ -293,8 +333,12 @@ export async function expandFollowingDepthGraph(params: {
     500,
   );
 
-  const rootUser = await ghFetch<GithubPublicUser>(token, `/users/${encodeURIComponent(rootLogin)}`);
-  const rootNode = toNode(rootUser, true, 0, 0);
+  const normalizedRoot = rootLogin.trim();
+  const [rootUser, rootAugments] = await Promise.all([
+    ghFetch<GithubPublicUser>(token, `/users/${encodeURIComponent(normalizedRoot)}`),
+    fetchProfileAugments(token, normalizedRoot),
+  ]);
+  const rootNode = toNode(rootUser, true, 0, 0, rootAugments);
   persistNode(db, toNodeRow(rootNode, 0, 0));
 
   const nodeById = new Map<number, NodeDTO>();
@@ -325,9 +369,12 @@ export async function expandFollowingDepthGraph(params: {
     if (expandedIds.has(u.id)) continue;
     expandedIds.add(u.id);
 
-    const freshSelf = await ghFetch<GithubPublicUser>(token, `/users/${encodeURIComponent(u.login)}`);
+    const [freshSelf, expandAugments] = await Promise.all([
+      ghFetch<GithubPublicUser>(token, `/users/${encodeURIComponent(u.login)}`),
+      fetchProfileAugments(token, u.login),
+    ]);
     const isRootUser = u.id === rootNode.githubId;
-    const parentDto = toNode(freshSelf, isRootUser, u.depth, 1);
+    const parentDto = toNode(freshSelf, isRootUser, u.depth, 1, expandAugments);
     nodeById.set(u.id, parentDto);
     persistNode(db, toNodeRow(parentDto, parentDto.depth, 1));
 
