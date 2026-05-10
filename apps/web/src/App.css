@@ -36,9 +36,12 @@ textarea {
 
 .app-logo-slot {
   position: fixed;
-  top: max(24px, env(safe-area-inset-top));
-  left: max(24px, env(safe-area-inset-left));
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   z-index: 300;
+  /* Let pan/zoom pass through except on the logo button. */
+  pointer-events: none;
 }
 
 .app-logo-hit {
@@ -51,6 +54,7 @@ textarea {
   line-height: 0;
   border-radius: 10px;
   -webkit-tap-highlight-color: transparent;
+  pointer-events: auto;
 }
 
 .app-logo-hit:focus-visible {

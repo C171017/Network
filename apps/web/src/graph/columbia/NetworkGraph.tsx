@@ -1696,10 +1696,13 @@ const NetworkGraph = ({
           }
         }
 
-        // Upper-left app logo (`App.css` `.app-logo-slot` + ~half rendered size).
-        const logoInset = 24;
-        const logoSx = logoInset + 61;
-        const logoSy = logoInset + 29;
+        // Centered app logo: sample viewport center in SVG-relative client pixels.
+        const logoCx =
+          typeof window !== 'undefined' ? window.innerWidth / 2 : graphRect.left + graphRect.width / 2;
+        const logoCy =
+          typeof window !== 'undefined' ? window.innerHeight / 2 : graphRect.top + graphRect.height / 2;
+        const logoSx = logoCx - graphRect.left;
+        const logoSy = logoCy - graphRect.top;
         const logoIsDark = logoPxIsDark(logoSx, logoSy);
         if (logoIsDark !== lastLogoUiIsDark) {
           lastLogoUiIsDark = logoIsDark;
