@@ -101,8 +101,14 @@
   stroke-width: 2px;
 }
 
-path {
-  stroke-opacity: .8;
+.link-full {
+  fill-opacity: .55;
+  pointer-events: none;
+  transition: opacity .2s, fill-opacity .2s ease;
+}
+
+.link-full.highlight {
+  fill-opacity: 1;
 }
 
 .legend-container {
@@ -174,23 +180,20 @@ path {
 }
 
 .node,
-.link-full,
-.link-arrow {
+.link-full {
   transition: opacity .2s;
 }
 
 /* Desktop Safari can stutter when many SVG elements transition opacity. */
 .network-container.desktop-safari .node,
-.network-container.desktop-safari .link-full,
-.network-container.desktop-safari .link-arrow {
+.network-container.desktop-safari .link-full {
   transition: none;
 }
 
 /* Instant opacity on touch / narrow viewports — avoids jank when toggling focus on many SVG elements. */
 @media (hover: none), (max-width: 768px) {
   .node,
-  .link-full,
-  .link-arrow {
+  .link-full {
     transition: none;
   }
 }
@@ -205,8 +208,7 @@ path {
 
 .node.highlight circle,
 .node.highlight path,
-.link-full.highlight,
-.link-arrow.highlight {
+.link-full.highlight {
   opacity: 1 !important;
 }
 

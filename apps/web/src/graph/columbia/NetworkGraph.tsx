@@ -19,8 +19,7 @@ import { buildGroups as buildGroupsFromData } from './groups';
 import {
   clampNodeCenterToMovableDisk as clampNodeToDisk,
   clampNodesInPlace as clampNodesToDisk,
-  linkPath as computeLinkPath,
-  arrowPathAtFraction
+  linkWedgePath as computeLinkPath
 } from './geometry';
 import { renderClusterContents as renderClusterContentsFromModule } from './clusters';
 import {
@@ -647,18 +646,26 @@ const NetworkGraph = ({
           .attr('in', 'SourceGraphic')
           .attr('stdDeviation', 2.2);
       }
-      defs.append('marker')
-        .attr('id', 'arrow')
-        .attr('viewBox', '0 -5 10 10')
-        .attr('refX', 1)
-        .attr('refY', 0)
-        .attr('markerWidth', 30)
-        .attr('markerHeight', 30)
-        .attr('orient', 'auto')
-        .append('path')
-        .attr('d', 'M0,-5L10,0L0,5')
-        .attr('fill', '#ffffff')
-        .attr('fill-opacity', 0.55);
+      // No arrowhead marker: each link is rendered as a tapered wedge
+      // (linkWedgePath in ./geometry) whose shape itself encodes direction.
+
+      if (enableHeavySvgEffects) {
+        // Soft halo around link wedges — applied to the active link layer
+        // so links read as luminous filaments rather than flat polygons.
+        const linkGlow = defs.append('filter')
+          .attr('id', 'link-glow')
+          .attr('x', '-20%')
+          .attr('y', '-20%')
+          .attr('width', '140%')
+          .attr('height', '140%');
+        linkGlow.append('feGaussianBlur')
+          .attr('in', 'SourceGraphic')
+          .attr('stdDeviation', 1.2)
+          .attr('result', 'blur');
+        const linkGlowMerge = linkGlow.append('feMerge');
+        linkGlowMerge.append('feMergeNode').attr('in', 'blur');
+        linkGlowMerge.append('feMergeNode').attr('in', 'SourceGraphic');
+      }
 
       if (enableHeavySvgEffects) {
         // Keep cluster cloud blur on desktop only; skip on mobile.
@@ -852,9 +859,29 @@ const NetworkGraph = ({
         l.__groupIndex = groupMap.get(l.source.id ?? l.source);
       });
 
+      // Mutual / reciprocal edge detection. The data model is purely directed
+      // (one row per "A follows B"), so a mutual relationship appears as two
+      // separate links. We tag both members with __isMutual so the wedge
+      // geometry can offset them perpendicularly into a "two-lane" layout.
+      {
+        const directed = new Set();
+        for (const l of data.links) {
+          const sId = l.source.id ?? l.source;
+          const tId = l.target.id ?? l.target;
+          directed.add(`${sId}\u0001${tId}`);
+        }
+        for (const l of data.links) {
+          const sId = l.source.id ?? l.source;
+          const tId = l.target.id ?? l.target;
+          l.__isMutual = directed.has(`${tId}\u0001${sId}`);
+        }
+      }
+
       // Active + parked layers for DOM culling. Culled elements are moved to parked
       // layers (detached from visible world) and reattached when needed.
-      const activeLinkLayer = world.append('g').attr('class', 'link-layer-active');
+      const activeLinkLayer = world.append('g')
+        .attr('class', 'link-layer-active')
+        .attr('filter', enableHeavySvgEffects ? 'url(#link-glow)' : null);
       const activeNodeLayer = world.append('g').attr('class', 'node-layer-active');
       const activeClusterLayer = world.append('g').attr('class', 'cluster-layer-active');
       const parkedRoot = g.append('g')
@@ -865,24 +892,17 @@ const NetworkGraph = ({
       const parkedNodeLayer = parkedRoot.append('g').attr('class', 'node-layer-parked');
       const parkedClusterLayer = parkedRoot.append('g').attr('class', 'cluster-layer-parked');
 
-      // Create links
+      // Create links — one filled tapered wedge per directed edge. The wedge
+      // narrows toward the target, so the geometry itself communicates
+      // direction (no separate arrow marker required). Mutual pairs are
+      // offset perpendicularly inside computeLinkPath().
       const fullLinks = activeLinkLayer.selectAll('.link-full')
         .data(data.links)
         .enter()
         .append('path')
         .attr('class', 'link-full')
-        .attr('fill', 'none')
-        .attr('stroke', '#ffffff')
-        .attr('stroke-width', 2)
-        .attr('stroke-linecap', 'round');
-      const arrowLinks = activeLinkLayer.selectAll('.link-arrow')
-        .data(data.links)
-        .enter()
-        .append('path')
-        .attr('class', 'link-arrow')
-        .attr('fill', 'none')
-        .attr('stroke', 'none')
-        .attr('marker-end', 'url(#arrow)');
+        .attr('fill', '#e5e7eb')
+        .attr('stroke', 'none');
 
       // Create nodes
       const node = activeNodeLayer
@@ -947,10 +967,6 @@ const NetworkGraph = ({
       fullLinks.each(function (d) {
         fullLinksByGroup[d.__groupIndex].push(this);
       });
-      const arrowLinksByGroup = Array.from({ length: groupCount }, () => []);
-      arrowLinks.each(function (d) {
-        arrowLinksByGroup[d.__groupIndex].push(this);
-      });
       const nodesByGroup = Array.from({ length: groupCount }, () => []);
       node.each(function (d) {
         nodesByGroup[d.__groupIndex].push(this);
@@ -982,17 +998,6 @@ const NetworkGraph = ({
             const t = groupMap.get(lk.target.id ?? lk.target);
             const isLinkHi = s === currentHighlight && t === currentHighlight;
             d3.select(fl[i])
-              .classed('highlight', isLinkHi)
-              .classed('dim', currentHighlight !== null && !isLinkHi);
-          }
-
-          const als = arrowLinksByGroup[gi];
-          for (let i = 0; i < als.length; i++) {
-            const lk = d3.select(als[i]).datum();
-            const s = groupMap.get(lk.source.id ?? lk.source);
-            const t = groupMap.get(lk.target.id ?? lk.target);
-            const isLinkHi = s === currentHighlight && t === currentHighlight;
-            d3.select(als[i])
               .classed('highlight', isLinkHi)
               .classed('dim', currentHighlight !== null && !isLinkHi);
           }
@@ -1029,12 +1034,6 @@ const NetworkGraph = ({
           const el = fl[i];
           const lk = d3.select(el).datum();
           d3.select(el).attr('d', computeLinkPath(lk));
-        }
-        const als = arrowLinksByGroup[gi];
-        for (let i = 0; i < als.length; i += 1) {
-          const el = als[i];
-          const lk = d3.select(el).datum();
-          d3.select(el).attr('d', arrowPathAtFraction(lk, 1 / 3));
         }
       };
 
@@ -1099,7 +1098,6 @@ const NetworkGraph = ({
         if (linkAttached[gi] === attach) return;
         const target = attach ? activeLinkLayer.node() : parkedLinkLayer.node();
         moveElems(fullLinksByGroup[gi], target);
-        moveElems(arrowLinksByGroup[gi], target);
         linkAttached[gi] = attach;
       };
 
@@ -1433,10 +1431,6 @@ const NetworkGraph = ({
         fullLinks
           .filter(d => visibleGroups.has(d.__groupIndex))
           .attr('d', d => computeLinkPath(d));
-        // Arrow paths at 1/3 from source → target
-        arrowLinks
-          .filter(d => visibleGroups.has(d.__groupIndex))
-          .attr('d', (d) => arrowPathAtFraction(d, 1 / 3));
 
         // Update node positions
         node

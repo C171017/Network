@@ -8,6 +8,25 @@ export const LINK_FORCE_DISTANCE_GROUP_MINI = 450
 /** Link stiffness [0,1]; lower = softer / more elastic (1 = rigid). */
 export const LINK_FORCE_STRENGTH = 0.38
 
+/**
+ * Tapered-wedge link geometry. Each link is rendered as a filled trapezoid
+ * that is wider at the source end and tapers toward the target — the wedge
+ * IS the arrow, so direction is encoded by the shape itself (no separate
+ * arrowhead marker is needed).
+ *
+ * For mutual / reciprocal edges, both members of the pair are shifted by
+ * `LINK_WEDGE_MUTUAL_OFFSET` along the perpendicular to their forward
+ * direction. Because the reverse edge has a flipped forward direction, the
+ * same +offset along its own perpendicular naturally places it on the
+ * opposite visual side, producing a "two-lane road" indicator.
+ *
+ * All values are in SVG user units (the same coordinate system as
+ * NODE_RADIUS).
+ */
+export const LINK_WEDGE_SOURCE_HALF_WIDTH = 2.4
+export const LINK_WEDGE_TARGET_HALF_WIDTH = 0.3
+export const LINK_WEDGE_MUTUAL_OFFSET = 6
+
 export const ZOOM_MIN_DESKTOP = 0.03
 export const ZOOM_MAX_DESKTOP = 0.8
 export const ZOOM_MIN_MOBILE = 0.01
