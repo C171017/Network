@@ -3,7 +3,6 @@
   --node-border: rgba(226, 232, 240, 0.9);
   --node-border-hover: rgba(59, 130, 246, 0.9);
   --node-border-active: #2563eb;
-  --node-accent-ring: rgba(59, 130, 246, 0.55);
   --node-shadow: 0 1px 3px rgba(15, 23, 42, 0.16);
   --text-color: #111827;
   --text-light: #6b7280;
@@ -255,12 +254,6 @@
 .node circle.node-outline {
   stroke: var(--node-border);
   stroke-width: 1.4px;
-}
-
-.node .node-accent-ring {
-  stroke: var(--node-accent-ring);
-  stroke-width: 1.1px;
-  opacity: 0.95;
 }
 
 .node .node-hub {
