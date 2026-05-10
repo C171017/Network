@@ -432,6 +432,7 @@ export default function App() {
           <NetworkGraph
             data={graph}
             interactivePhysics={interactivePhysics}
+            authenticatedSession={session != null}
             onNodeCrawl={crawlFromLogin}
             onUiSurfaceChange={setUiSurfaceDark}
           />

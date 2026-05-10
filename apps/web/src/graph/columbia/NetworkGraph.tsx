@@ -541,6 +541,7 @@ const NetworkGraph = ({
   setColorBy,
   data,
   interactivePhysics = false,
+  authenticatedSession = false,
   onNodeCrawl,
   onUiSurfaceChange
 }) => {
@@ -643,8 +644,12 @@ const NetworkGraph = ({
         if (event.type === 'dblclick') return false;
         // Wheel is routed manually to support hybrid pan/zoom semantics.
         if (event.type === 'wheel') return false;
-        // Allow left button (0) for normal pan; middle button (1) is handled separately.
-        if (event.type === 'mousedown') return event.button === 0;
+        const tgt = event.target;
+        const fromNode = Boolean(tgt && typeof tgt.closest === 'function' && tgt.closest('.node'));
+        // Primary button pans the view unless the gesture begins on a node (d3-drag must own it).
+        if (event.type === 'mousedown') return event.button === 0 && !fromNode;
+        // Single-finger pans from the background only; pinch (2+ touches) still zooms.
+        if (event.type === 'touchstart' && event.touches?.length === 1 && fromNode) return false;
         return true;
       });
 
@@ -1060,14 +1065,46 @@ const NetworkGraph = ({
         nodesByGroupSeed[groupMap.get(n.id)].push(n);
       });
 
+      const totalNodesForLayout = data.nodes.length;
+      const sqrtTotalNodes = Math.sqrt(Math.max(1, totalNodesForLayout));
+
       // Seed nodes with Poisson-like rejection inside each group's disk so they
       // start dispersed instead of piled near the center.
       for (let gi = 0; gi < groupCount; gi++) {
         const c = centres[gi] || { x: CIRCLE_CX, y: CIRCLE_CY };
         const groupNodes = nodesByGroupSeed[gi];
         const seeded = [];
-        const radialLimit = Math.max(groupR[gi] - 36, 28);
-        const minSepBase = Math.min(92, Math.max(42, NODE_RADIUS * 1.7));
+        const gN = groupNodes.length;
+        const sqrtG = Math.sqrt(Math.max(1, gN));
+
+        // `groupR` is tuned for clearing between group *centres*; using it as the
+        // within-group seed radius caps large (often single-component) graphs to a
+        // tiny ball while the movable disk is enormous. Scale with node count and
+        // how much annulus is actually reachable from this group's centre.
+        const centreDist = Math.hypot(c.x - CIRCLE_CX, c.y - CIRCLE_CY);
+        const diskBudget = Math.max(
+          NODE_RADIUS + 20,
+          movableLimit - centreDist - NODE_RADIUS - 28
+        );
+        const canvasUtil = Math.min(
+          0.94,
+          0.14 + 0.84 * (1 - Math.exp(-totalNodesForLayout / 115))
+        );
+        const sessionUtil = authenticatedSession
+          ? Math.min(0.97, canvasUtil + 0.07)
+          : canvasUtil;
+        const sizeDrivenRadius =
+          95 + NODE_RADIUS * sqrtG * (2.05 + 0.72 * sqrtTotalNodes);
+        const legacyRadialFloor = Math.max(groupR[gi] - 36, 28);
+        const radialLimit = Math.max(
+          legacyRadialFloor,
+          Math.min(diskBudget * sessionUtil, sizeDrivenRadius)
+        );
+
+        const minSepBase = Math.min(
+          118,
+          Math.max(40, NODE_RADIUS * (1.65 + 0.038 * sqrtTotalNodes))
+        );
 
         groupNodes.forEach((n, idx) => {
           let placed = null;
@@ -1247,13 +1284,13 @@ const NetworkGraph = ({
 
       let currentHighlight = null;
 
-      /** Apply highlight/dim only to viewport-visible groups (same culling as physics/DOM). */
+      /** Apply highlight/dim to every group's DOM (including viewport-culled layers). Skipping parked
+       * groups left stale classes on <g.node> / links, which surfaced as “everything selected” once
+       * those elements were shown again or after physics drags near cull boundaries. */
       const applyViewportHighlightClasses = () => {
         if (inClusterMode || groupCount === 0) return;
 
         for (let gi = 0; gi < groupCount; gi++) {
-          if (!visibleGroups.has(gi)) continue;
-
           const ns = nodesByGroup[gi];
           for (let i = 0; i < ns.length; i++) {
             const d = d3.select(ns[i]).datum();
@@ -1863,6 +1900,7 @@ const NetworkGraph = ({
       let dragHadMovement = false;
 
       const releaseActiveDrag = () => {
+        svg.classed('network-graph--node-dragging', false);
         if (interactivePhysicsRef.current) {
           stopGroupMiniSimFully();
         }
@@ -1890,6 +1928,7 @@ const NetworkGraph = ({
         }
 
         activeDragNode = d;
+        svg.classed('network-graph--node-dragging', true);
         const gi = groupMap.get(d.id);
         const p = clampNodeToDisk(d.x, d.y);
         d.fx = p.x;
@@ -1931,6 +1970,7 @@ const NetworkGraph = ({
     }
 
     return () => {
+      svgRef.current?.classList.remove('network-graph--node-dragging');
       if (nodeClickTimer != null) {
         clearTimeout(nodeClickTimer);
         nodeClickTimer = null;
@@ -1950,10 +1990,11 @@ const NetworkGraph = ({
         zoomCleanupRef.current = null;
       }
     };
-    // Intentionally only `data`: full D3 scene graph is rebuilt when the dataset changes;
-    // `colorBy` / `colorMaps` updates are handled by the recolor effect below.
+    // Rebuild when the dataset changes (primary) or when auth session toggles—the same
+    // node count may still merit a denser-layout profile after sign-in. `colorBy` /
+    // `colorMaps` updates use the lighter recolor effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above
-  }, [data]);
+  }, [data, authenticatedSession]);
 
 
   // Lightweight recolor effect

@@ -267,6 +267,18 @@
   stroke-width: 2px;
 }
 
+/* While dragging a node, many elements can sweep under the cursor; suppress :hover stroke
+   or it looks like every node is “selected” and the ring can stick until the next move. */
+.network-graph.network-graph--node-dragging .node:hover circle:not(.node-hub):not(.long-press-ring):not(.node-outline),
+.network-graph.network-graph--node-dragging .node:hover path {
+  stroke: var(--node-border);
+  stroke-width: 1px;
+}
+.network-graph.network-graph--node-dragging .node:hover circle.node-outline {
+  stroke: var(--node-border);
+  stroke-width: 1.4px;
+}
+
 /* Long-press progress ring (hold-to-crawl). Stroke fills clockwise from 12 o'clock. */
 .long-press-ring {
   stroke: #2563eb;
