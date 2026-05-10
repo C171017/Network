@@ -141,6 +141,7 @@ app.get("/health", (c) => c.json({ ok: true }));
 
 app.get("/api/graph/public", (c) => {
   const qMaxNodes = c.req.query("maxNodes")?.trim();
+  const qIncludeLogin = c.req.query("includeLogin")?.trim();
   let maxNodes: number | undefined;
   if (qMaxNodes) {
     const n = Number(qMaxNodes);
@@ -150,7 +151,10 @@ app.get("/api/graph/public", (c) => {
     maxNodes = n;
   }
   try {
-    const graph = readFullGraphWithOptions(graphDb, { maxNodes });
+    const graph = readFullGraphWithOptions(graphDb, {
+      maxNodes,
+      includeLogin: qIncludeLogin && qIncludeLogin.length > 0 ? qIncludeLogin : undefined,
+    });
     return c.json(graph);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

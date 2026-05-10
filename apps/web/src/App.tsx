@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import NetworkGraph from './components/NetworkGraph'
 import { graphDtoToForceData, type GraphData } from './graph/graphDto'
@@ -8,9 +8,7 @@ import {
   DEFAULT_EXPAND_MAX_HOP_DEPTH,
   DEFAULT_EXPAND_STREAM_THROTTLE_MS,
   expandGraphStream,
-  fetchOwnedGraph,
   fetchPublicGraph,
-  type GraphDTO,
 } from './lib/graphApi'
 import { supabase, isSupabaseConfigured } from './lib/supabase'
 import { LONG_PRESS_MOVE_CANCEL_PX } from './graph/columbia/graphConstants'
@@ -51,40 +49,6 @@ function readGithubLoginFromUser(user: User): string | null {
   if (typeof userName === 'string' && userName.length > 0) return userName.replace(/^@/, '')
 
   return null
-}
-
-function buildSeedGraphDto(login: string): GraphDTO {
-  const normalized = login.trim()
-  const profileUrl = `https://github.com/${encodeURIComponent(normalized)}`
-  return {
-    rootLogin: normalized,
-    generatedAt: new Date().toISOString(),
-    caps: { maxFollowers: 0, maxFollowing: 0 },
-    truncation: {
-      followersTotal: null,
-      followingTotal: null,
-      followersReturned: 0,
-      followingReturned: 0,
-    },
-    nodes: [
-      {
-        githubId: -1,
-        login: normalized,
-        avatarUrl: '',
-        name: normalized,
-        bio: null,
-        company: null,
-        location: null,
-        websiteUrl: null,
-        profileUrl,
-        isRoot: true,
-        degree: 1,
-        expanded: 0,
-        profile: null,
-      },
-    ],
-    edges: [],
-  }
 }
 
 function mergeGraphDataAdditive(
@@ -146,6 +110,7 @@ export default function App() {
   const logoPointerStartRef = useRef<{ x: number; y: number } | null>(null)
   const [logoBoostSpinActive, setLogoBoostSpinActive] = useState(false)
   const [logoBoostSpinDurationMs, setLogoBoostSpinDurationMs] = useState(900)
+  const [focusAuthNodeNonce, setFocusAuthNodeNonce] = useState(0)
   const sessionRef = useRef<SessionInfo | null>(null)
 
   useEffect(() => {
@@ -338,8 +303,19 @@ export default function App() {
     if (logoSuppressClickRef.current) {
       logoSuppressClickRef.current = false
       e.preventDefault()
+      return
     }
+    if (!sessionRef.current) return
+    setFocusAuthNodeNonce((n) => n + 1)
   }
+
+  const [bootPhase, setBootPhase] = useState<'pulse' | 'fadeOut' | 'idle'>('pulse')
+  const resourcesReady = authSessionResolved && !graphLoading
+
+  useLayoutEffect(() => {
+    if (!resourcesReady || bootPhase !== 'pulse') return
+    setBootPhase('fadeOut')
+  }, [resourcesReady, bootPhase])
 
   const refreshGraphFromSql = useCallback(
     async (options?: { suppressLoadingSpinner?: boolean }) => {
@@ -347,20 +323,11 @@ export default function App() {
       if (!suppress) setGraphLoading(true)
       setGraphError(null)
       try {
-        if (!session) {
-          const dto = await fetchPublicGraph({ maxNodes: publicInitialMaxNodes })
-          setGraph(graphDtoToForceData(dto))
-        } else {
-          const dto = await fetchOwnedGraph({
-            supabaseAccessToken: session.supabaseAccessToken,
-          })
-          if (dto.nodes.length > 0) {
-            setGraph(graphDtoToForceData(dto))
-          } else {
-            // First signed-in experience: show a single seed node so user can long-press to expand.
-            setGraph(graphDtoToForceData(buildSeedGraphDto(session.login)))
-          }
-        }
+        const dto = await fetchPublicGraph({
+          maxNodes: publicInitialMaxNodes,
+          includeLogin: session?.login,
+        })
+        setGraph(graphDtoToForceData(dto))
       } catch (e) {
         setGraph(null)
         setGraphError(e instanceof Error ? e.message : String(e))
@@ -537,20 +504,30 @@ export default function App() {
         {graph && graph.nodes.length > 0 ? (
           <NetworkGraph
             data={graph}
+            focusLoginRequest={session ? { login: session.login, nonce: focusAuthNodeNonce } : null}
             interactivePhysics={interactivePhysics}
             authenticatedSession={session != null}
             onNodeCrawl={crawlFromLogin}
             onUiSurfaceChange={setUiSurfaceDark}
           />
-        ) : graphLoading ? (
-          <div className="graph-placeholder">Loading graph from database…</div>
         ) : (
-          <div className="graph-placeholder">
-            No nodes in the local graph database yet. Sign in to start from your own node, then long-hold a node to
-            expand.
-          </div>
+          <div className="graph-surface-muted" aria-hidden />
         )}
       </div>
+
+      {bootPhase !== 'idle' ? (
+        <div
+          className={`app-boot-veil${bootPhase === 'fadeOut' ? ' app-boot-veil--fade-out' : ''}`}
+          aria-hidden
+          onAnimationEnd={(e) => {
+            if (bootPhase !== 'fadeOut') return
+            if ((e.animationName ?? '') !== 'app-boot-fade-away') return
+            setBootPhase('idle')
+          }}
+        >
+          <div className="app-boot-veil__glow" />
+        </div>
+      ) : null}
 
     </div>
   )

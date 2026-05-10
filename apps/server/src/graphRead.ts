@@ -114,13 +114,26 @@ function clampRequestedMaxNodes(n: number, defaultMaxNodes: number): number {
 
 export function readFullGraphWithOptions(
   db: Database.Database,
-  options?: { maxNodes?: number },
+  options?: { maxNodes?: number; includeLogin?: string },
 ): GraphDTO {
   const caps = readCaps();
   const maxNodes =
     options?.maxNodes != null ? clampRequestedMaxNodes(options.maxNodes, caps.maxNodes) : caps.maxNodes;
   const maxEdges = caps.maxEdges;
   const now = new Date().toISOString();
+  const includeLogin = options?.includeLogin?.trim().toLowerCase() ?? "";
+  let pinnedRow: NodeRow | undefined;
+  if (includeLogin) {
+    pinnedRow = db
+      .prepare(
+        `SELECT ${NODE_SELECT}
+         FROM nodes
+         WHERE lower(login) = ?
+         ORDER BY updated_at DESC
+         LIMIT 1`,
+      )
+      .get(includeLogin) as NodeRow | undefined;
+  }
   // Sample from the entire accumulated SQL pool (all owners), then de-duplicate by
   // GitHub id so public mode reflects globally available data instead of one namespace.
   const poolRows = db
@@ -133,6 +146,10 @@ export function readFullGraphWithOptions(
     .all(Math.min(maxNodes * 4, 200_000)) as NodeRow[];
   const dedupedRows: NodeRow[] = [];
   const seenGithubIds = new Set<number>();
+  if (pinnedRow) {
+    dedupedRows.push(pinnedRow);
+    seenGithubIds.add(pinnedRow.github_id);
+  }
   for (const row of poolRows) {
     if (seenGithubIds.has(row.github_id)) continue;
     seenGithubIds.add(row.github_id);
@@ -157,7 +174,8 @@ export function readFullGraphWithOptions(
     };
   }
 
-  const nodes: NodeDTO[] = nodeRows.map((r) => rowToNode(r, false));
+  const pinnedGithubId = pinnedRow?.github_id;
+  const nodes: NodeDTO[] = nodeRows.map((r) => rowToNode(r, r.github_id === pinnedGithubId));
   const ids = nodeRows.map((r) => r.github_id);
 
   ensureNodeSubsetTemp(db);
@@ -182,7 +200,7 @@ export function readFullGraphWithOptions(
     }));
 
     return {
-      rootLogin: "",
+      rootLogin: pinnedRow?.login ?? "",
       generatedAt: now,
       caps: { maxFollowers: 0, maxFollowing: 0 },
       truncation: {

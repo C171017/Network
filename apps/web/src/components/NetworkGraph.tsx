@@ -5,6 +5,7 @@ const DEFAULT_COLOR_BY = 'degree'
 
 type Props = {
   data: VisualizationGraphData | null
+  focusLoginRequest?: { login: string; nonce: number } | null
   onNodeCrawl?: (login: string) => void
   /** Same dark/light chrome as control panel & legend (inner disk vs outer ramp). */
   onUiSurfaceChange?: (isDark: boolean) => void
@@ -16,6 +17,7 @@ type Props = {
 
 export default function NetworkGraph({
   data,
+  focusLoginRequest,
   onNodeCrawl,
   onUiSurfaceChange,
   interactivePhysics,
@@ -26,6 +28,7 @@ export default function NetworkGraph({
     <ColumbiaNetworkGraph
       colorBy={DEFAULT_COLOR_BY}
       data={data}
+      focusLoginRequest={focusLoginRequest}
       interactivePhysics={interactivePhysics}
       authenticatedSession={authenticatedSession}
       onNodeCrawl={onNodeCrawl}

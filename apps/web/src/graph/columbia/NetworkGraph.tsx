@@ -706,6 +706,7 @@ const LOGO_DARK_DISK_RADIUS_FACTOR = 1.06;
 
 const NetworkGraph = ({
   colorBy,
+  focusLoginRequest = null,
   data,
   interactivePhysics = false,
   authenticatedSession = false,
@@ -2265,6 +2266,24 @@ const NetworkGraph = ({
       graphLiveApiRef.current = {
         session: authenticatedSessionRef.current,
         getPersistableZoom: () => d3.zoomTransform(svgNodeEl),
+        focusLogin: (loginRaw) => {
+          const login = String(loginRaw ?? '').trim().toLowerCase();
+          if (!login) return false;
+          const targetNode = live.nodes.find((n) => String(n.login ?? '').trim().toLowerCase() === login);
+          if (!targetNode || !Number.isFinite(targetNode.x) || !Number.isFinite(targetNode.y)) return false;
+          const targetK = Math.max(
+            currentTransform.k,
+            isMobileViewport() ? 0.2 : 0.14,
+          );
+          const target = d3.zoomIdentity
+            .translate(width / 2, height / 2)
+            .scale(targetK)
+            .translate(-targetNode.x, -targetNode.y);
+          svg.transition()
+            .duration(520)
+            .call(zoom.transform, target);
+          return true;
+        },
         tryIncrementalUpdate: (nextDataset) => {
           const nextLinksList = nextDataset.links ?? [];
 
@@ -2620,6 +2639,16 @@ const NetworkGraph = ({
   }, [authenticatedSession]);
 
   // Monotonic dataset growth (streaming expand): update simulation/DOM without resetting zoom.
+  useEffect(() => {
+    if (!focusLoginRequest?.login) return undefined;
+    const api = graphLiveApiRef.current;
+    if (api?.focusLogin?.(focusLoginRequest.login)) return undefined;
+    const id = window.setTimeout(() => {
+      graphLiveApiRef.current?.focusLogin?.(focusLoginRequest.login);
+    }, 0);
+    return () => window.clearTimeout(id);
+  }, [focusLoginRequest?.nonce, focusLoginRequest?.login, data]);
+
   useEffect(() => {
     const api = graphLiveApiRef.current;
     if (!api || api.session !== authenticatedSession) return undefined;

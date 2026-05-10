@@ -331,12 +331,15 @@ async function parseGraphResponse(res: Response): Promise<GraphDTO> {
   return json as GraphDTO
 }
 
-export async function fetchPublicGraph(params?: { maxNodes?: number }): Promise<GraphDTO> {
-  const q =
-    params?.maxNodes != null && Number.isFinite(params.maxNodes) && params.maxNodes > 0
-      ? `?maxNodes=${encodeURIComponent(String(Math.floor(params.maxNodes)))}`
-      : ''
-  const res = await fetch(apiUrl(`/api/graph/public${q}`))
+export async function fetchPublicGraph(params?: { maxNodes?: number; includeLogin?: string }): Promise<GraphDTO> {
+  const sp = new URLSearchParams()
+  if (params?.maxNodes != null && Number.isFinite(params.maxNodes) && params.maxNodes > 0) {
+    sp.set('maxNodes', String(Math.floor(params.maxNodes)))
+  }
+  const includeLogin = params?.includeLogin?.trim()
+  if (includeLogin) sp.set('includeLogin', includeLogin)
+  const q = sp.toString()
+  const res = await fetch(apiUrl(`/api/graph/public${q ? `?${q}` : ''}`))
   return parseGraphResponse(res)
 }
 
