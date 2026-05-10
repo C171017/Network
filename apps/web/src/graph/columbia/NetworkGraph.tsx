@@ -155,6 +155,14 @@ function renderNodeVisual(nodeGroup, d, nodePathInfo, options) {
   if (includeHub && !simplified) {
     nodeGroup.append('circle').attr('class', 'node-hub').attr('r', 6);
   }
+
+  // Static outer accent ring for stronger node readability without animation cost.
+  nodeGroup
+    .append('circle')
+    .attr('class', 'node-accent-ring')
+    .attr('r', NODE_RADIUS + 2.2)
+    .attr('fill', 'none')
+    .attr('pointer-events', 'none');
 }
 
 //////////////////////////////////////////////////////

@@ -1,5 +1,10 @@
 .network-container {
   --primary-color: #2563eb;
+  --node-border: rgba(226, 232, 240, 0.9);
+  --node-border-hover: rgba(59, 130, 246, 0.9);
+  --node-border-active: #2563eb;
+  --node-accent-ring: rgba(59, 130, 246, 0.55);
+  --node-shadow: 0 1px 3px rgba(15, 23, 42, 0.16);
   --text-color: #111827;
   --text-light: #6b7280;
   --card-bg: #ffffff;
@@ -76,20 +81,45 @@
 
 .node circle {
   cursor: pointer;
-  transition: transform .3s;
+  transition: stroke .14s ease, stroke-width .14s ease, opacity .14s ease;
+}
+
+.node circle:not(.node-hub):not(.long-press-ring):not(.node-outline),
+.node path {
+  stroke: var(--node-border);
+  stroke-width: 1px;
+  paint-order: stroke fill;
+}
+
+.node circle.node-outline {
+  stroke: var(--node-border);
+  stroke-width: 1.4px;
+}
+
+.node .node-accent-ring {
+  stroke: var(--node-accent-ring);
+  stroke-width: 1.1px;
+  opacity: 0.95;
+}
+
+.node .node-hub {
+  fill: #0f172a;
+  stroke: rgba(255, 255, 255, 0.65);
+  stroke-width: 0.8px;
 }
 
 .node text {
   pointer-events: none;
   font-family: var(--font-sans);
-  font-weight: 600;
-  text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
-  letter-spacing: .02em;
+  font-weight: 500;
+  letter-spacing: .01em;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.22);
 }
 
-.node:hover circle:not(.node-hub),
-.node:hover circle.node-outline {
-  stroke: #202124;
+.node:hover circle:not(.node-hub):not(.long-press-ring):not(.node-outline),
+.node:hover circle.node-outline,
+.node:hover path {
+  stroke: var(--node-border-hover);
   stroke-width: 2px;
 }
 
@@ -112,7 +142,7 @@
 }
 
 .link-full {
-  fill-opacity: .55;
+  fill-opacity: .48;
   pointer-events: none;
   transition: opacity .2s, fill-opacity .2s ease;
 }
@@ -220,6 +250,13 @@
 .node.highlight path,
 .link-full.highlight {
   opacity: 1 !important;
+}
+
+.node.highlight circle:not(.node-hub):not(.long-press-ring):not(.node-outline),
+.node.highlight circle.node-outline,
+.node.highlight path {
+  stroke: var(--node-border-active);
+  stroke-width: 2px;
 }
 
 .controls-legend-container {
