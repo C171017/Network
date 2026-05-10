@@ -22,7 +22,7 @@ export const DEFAULT_FOLLOWING_BRANCH = 3;
 /** Max `per_page` for list endpoints (GitHub allows up to 100). */
 export const DEFAULT_LIST_PER_PAGE = 100;
 /**
- * List pages to fetch before the first selection pass (strict → avatar → any within that pool).
+ * List pages to fetch before the first selection pass (strict → location → any within that pool).
  * Stays on a small first budget so we prefer not to over-fetch when the first page is enough.
  */
 export const DEFAULT_FIRST_BUDGET_PAGES = 1;
@@ -33,7 +33,7 @@ export const DEFAULT_FIRST_BUDGET_PAGES = 1;
 export const DEFAULT_SECOND_BUDGET_PAGES = 3;
 /**
  * Max `GET /users/{login}` calls per side when turning list “simple users” into full profiles
- * so tier 1 (location + company + avatar) can use real fields. Lists omit location/company.
+ * so tier 1–2 (location / company / avatar fields) can use real values. Lists omit location/company.
  */
 export const DEFAULT_PROFILE_ENRICH_PER_SIDE = 45;
 /** Expand nodes at depths 0 … maxHopDepth - 1; deepest discovered users sit at `maxHopDepth`. */
@@ -69,6 +69,10 @@ function hasProfilePic(u: GithubUserApi): boolean {
 
 function matchesTier1(u: GithubUserApi): boolean {
   return hasPresent(u.location) && hasPresent(u.company) && hasProfilePic(u);
+}
+
+function matchesTier2(u: GithubUserApi): boolean {
+  return hasPresent(u.location);
 }
 
 function dedupeByGithubId(users: GithubUserApi[]): GithubUserApi[] {
@@ -115,7 +119,7 @@ async function enrichUpToBudget(
 }
 
 /**
- * Pick up to `target` users: prefer location+company+avatar, then any with avatar, then anyone.
+ * Pick up to `target` users: prefer location+company+avatar, then any with location, then anyone.
  * Order within each tier is random (shuffle of pool at start, then linear passes preserve that order).
  */
 export function selectNeighborsTiered(pool: GithubUserApi[], target: number): GithubUserApi[] {
@@ -136,7 +140,7 @@ export function selectNeighborsTiered(pool: GithubUserApi[], target: number): Gi
   for (const u of shuffled) {
     if (picked.length >= target) break;
     if (pickedIds.has(u.id)) continue;
-    if (hasProfilePic(u)) {
+    if (matchesTier2(u)) {
       picked.push(u);
       pickedIds.add(u.id);
     }
@@ -238,7 +242,7 @@ function toNodeRow(n: NodeDTO, depth: number, expanded: 0 | 1): NodeRowInput {
 /**
  * BFS using **both** directions per user: up to `branchFollowing` accounts they follow (outgoing)
  * and up to `branchFollowers` followers (incoming). Neighbors are chosen with tiered rules
- * (location+company+avatar → avatar → anyone) over paginated lists; see `firstBudgetPages` /
+ * (location+company+avatar → location → anyone) over paginated lists; see `firstBudgetPages` /
  * `secondBudgetPages`. Edges stay canonical: `source → target` means source follows target.
  * Depth is hop count from the root in this mixed graph. All nodes and edges are written to SQLite
  * (`nodes`, `edges`) for accumulation across requests.
@@ -258,7 +262,7 @@ export async function expandFollowingDepthGraph(params: {
   firstBudgetPages?: number;
   /** Max cumulative list pages per side (must be ≥ `firstBudgetPages`). */
   secondBudgetPages?: number;
-  /** Cap `GET /users/{login}` calls per side per expanded node for tier-1 fields (lists omit them). */
+  /** Cap `GET /users/{login}` calls per side per expanded node for location/company (lists omit them). */
   maxProfileEnrichmentsPerSide?: number;
 }): Promise<GraphDTO> {
   const { token, rootLogin, db } = params;
