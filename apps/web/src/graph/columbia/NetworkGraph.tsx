@@ -557,8 +557,8 @@ const ZOOM_CLUSTER_THRESHOLD_MOBILE = 0.08;
 const CLUSTER_GROUP_MIN_NODES = 8;
 const CLUSTER_EXIT_HYSTERESIS = 0.02;
 const CLUSTER_EXCLUDED_COLORS = new Set(['#9e9e9e', '#999999', '#808080', 'gray', 'grey']);
-// Viewport group culling is enabled per-build for mobile only (see `enableViewportGroupCulling` in graph init).
-// Desktop keeps all groups attached for simpler physics/highlight behavior; cluster mode still helps when zoomed out.
+// Viewport group culling parks off-screen groups (see `enableViewportGroupCulling` in graph init).
+// Cluster mode still applies when zoomed out for very dense views.
 
 /** Skip full-screen link glow rasterization beyond this node count (desktop chrome only). */
 const LINK_GLOW_MAX_NODES = 420;
@@ -1015,8 +1015,8 @@ const NetworkGraph = ({
     if (!svgRef.current || !dataset?.nodes?.length) return undefined;
     const nodeCountHeavy = dataset.nodes.length;
     const isMobile = isMobileViewport();
-    /** Mobile-only: park off-screen groups for cheaper pan/zoom compositing (desktop keeps all groups live). */
-    const enableViewportGroupCulling = isMobile;
+    /** Park off-screen groups for cheaper pan/zoom compositing on all viewports. */
+    const enableViewportGroupCulling = true;
     const isDesktopSafari = isDesktopSafariBrowser();
     const enableHeavySvgEffects = !isMobile && !isDesktopSafari;
     const enableLinkGlow =

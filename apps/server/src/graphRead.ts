@@ -7,7 +7,7 @@ import type { EdgeDTO, GraphDTO, NodeDTO } from "./graphTypes.js";
  * nodes (signed-in reads always pin the user's root). Override at runtime with
  * `GRAPH_READ_MAX_NODES`.
  */
-const DEFAULT_MAX_NODES = 400;
+const DEFAULT_MAX_NODES = 200;
 
 /** No row cap on edges when unset; set `GRAPH_READ_MAX_EDGES` to a positive integer to limit. */
 function parseMaxEdges(): number | null {

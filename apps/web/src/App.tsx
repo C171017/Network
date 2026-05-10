@@ -32,7 +32,7 @@ type SessionInfo = {
 
 /** Persisted across the GitHub OAuth redirect so a long-press crawl can resume after sign-in. */
 const PENDING_CRAWL_KEY = 'network:pendingCrawlLogin'
-const DEFAULT_PUBLIC_INITIAL_MAX_NODES = 400
+const DEFAULT_PUBLIC_INITIAL_MAX_NODES = 200
 
 function readPublicInitialMaxNodes(): number {
   const raw = import.meta.env.VITE_PUBLIC_INITIAL_MAX_NODES
