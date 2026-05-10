@@ -13,8 +13,13 @@ import {
   type GraphDTO,
 } from './lib/graphApi'
 import { supabase, isSupabaseConfigured } from './lib/supabase'
-import { LONG_PRESS_MS, LONG_PRESS_MOVE_CANCEL_PX } from './graph/columbia/graphConstants'
+import { LONG_PRESS_MOVE_CANCEL_PX } from './graph/columbia/graphConstants'
 import './App.css'
+
+/** Logo-only: faster than graph node long-press so physics mode activates quickly. */
+const LOGO_PHYSICS_PRESS_MS = 380
+/** After physics (shake) is on, hold this long before the auth spin ramp can begin. */
+const LOGO_PHYSICS_DWELL_BEFORE_AUTH_MS = 1100
 
 type SessionInfo = {
   supabaseAccessToken: string
@@ -121,11 +126,10 @@ export default function App() {
   const [graph, setGraph] = useState<GraphData | null>(null)
   /** Matches graph chrome (dark inner disk vs light outer); default dark for page background before graph reports. */
   const [, setUiSurfaceDark] = useState(true)
-  const [accountMenuOpen, setAccountMenuOpen] = useState(false)
-  const accountMenuRef = useRef<HTMLDivElement>(null)
-  /** Graph “drag physics” — toggled by long-pressing the logo (same duration as node long-press). */
+  /** Graph “drag physics” — toggled by long-pressing the logo (logo uses its own timings). */
   const [interactivePhysics, setInteractivePhysics] = useState(false)
-  const logoLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const logoPhysicsPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const logoAuthDwellTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const logoSpinRafRef = useRef<number | null>(null)
   const logoSpinRampStartRef = useRef<number | null>(null)
   const logoSpinActiveRef = useRef(false)
@@ -135,6 +139,11 @@ export default function App() {
   const logoPointerStartRef = useRef<{ x: number; y: number } | null>(null)
   const [logoBoostSpinActive, setLogoBoostSpinActive] = useState(false)
   const [logoBoostSpinDurationMs, setLogoBoostSpinDurationMs] = useState(900)
+  const sessionRef = useRef<SessionInfo | null>(null)
+
+  useEffect(() => {
+    sessionRef.current = session
+  }, [session])
 
   useEffect(() => {
     if (!supabase) return
@@ -192,27 +201,14 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (!accountMenuOpen) return
-    function onPointerDown(e: PointerEvent) {
-      const el = accountMenuRef.current
-      if (!el?.contains(e.target as Node)) setAccountMenuOpen(false)
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setAccountMenuOpen(false)
-    }
-    document.addEventListener('pointerdown', onPointerDown, true)
-    document.addEventListener('keydown', onKey)
     return () => {
-      document.removeEventListener('pointerdown', onPointerDown, true)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [accountMenuOpen])
-
-  useEffect(() => {
-    return () => {
-      if (logoLongPressTimerRef.current != null) {
-        window.clearTimeout(logoLongPressTimerRef.current)
-        logoLongPressTimerRef.current = null
+      if (logoPhysicsPressTimerRef.current != null) {
+        window.clearTimeout(logoPhysicsPressTimerRef.current)
+        logoPhysicsPressTimerRef.current = null
+      }
+      if (logoAuthDwellTimerRef.current != null) {
+        window.clearTimeout(logoAuthDwellTimerRef.current)
+        logoAuthDwellTimerRef.current = null
       }
       if (logoSpinRafRef.current != null) {
         window.cancelAnimationFrame(logoSpinRafRef.current)
@@ -221,10 +217,14 @@ export default function App() {
     }
   }, [])
 
-  function clearLogoLongPressTimer() {
-    if (logoLongPressTimerRef.current != null) {
-      window.clearTimeout(logoLongPressTimerRef.current)
-      logoLongPressTimerRef.current = null
+  function clearLogoPressTimers() {
+    if (logoPhysicsPressTimerRef.current != null) {
+      window.clearTimeout(logoPhysicsPressTimerRef.current)
+      logoPhysicsPressTimerRef.current = null
+    }
+    if (logoAuthDwellTimerRef.current != null) {
+      window.clearTimeout(logoAuthDwellTimerRef.current)
+      logoAuthDwellTimerRef.current = null
     }
   }
 
@@ -258,11 +258,15 @@ export default function App() {
       const eased = t * t
       const spinMs = MAX_SPIN_MS - (MAX_SPIN_MS - MIN_SPIN_MS) * eased
       setLogoBoostSpinDurationMs(spinMs)
-      if (t >= 1 && !logoLoginTriggeredRef.current && !session) {
+      if (t >= 1 && !logoLoginTriggeredRef.current) {
         logoLoginTriggeredRef.current = true
         logoSuppressClickRef.current = true
         stopLogoSpinRamp()
-        void signIn()
+        if (sessionRef.current) {
+          void signOut()
+        } else {
+          void signIn()
+        }
         return
       }
       logoSpinRafRef.current = window.requestAnimationFrame(tick)
@@ -276,36 +280,36 @@ export default function App() {
     logoPointerStartRef.current = { x: e.clientX, y: e.clientY }
     logoPointerStartPhysicsRef.current = interactivePhysics
     logoLoginTriggeredRef.current = false
-    clearLogoLongPressTimer()
-    logoLongPressTimerRef.current = window.setTimeout(() => {
-      logoLongPressTimerRef.current = null
+    clearLogoPressTimers()
+    logoPhysicsPressTimerRef.current = window.setTimeout(() => {
+      logoPhysicsPressTimerRef.current = null
       logoSuppressClickRef.current = true
       if (logoPointerStartPhysicsRef.current) {
         setInteractivePhysics(false)
       } else {
         setInteractivePhysics(true)
+        logoAuthDwellTimerRef.current = window.setTimeout(() => {
+          logoAuthDwellTimerRef.current = null
+          startLogoSpinRamp()
+        }, LOGO_PHYSICS_DWELL_BEFORE_AUTH_MS)
       }
-      if (!session && !logoPointerStartPhysicsRef.current) {
-        startLogoSpinRamp()
-      }
-      setAccountMenuOpen(false)
-    }, LONG_PRESS_MS)
+    }, LOGO_PHYSICS_PRESS_MS)
     e.currentTarget.setPointerCapture(e.pointerId)
   }
 
   function onLogoPointerMove(e: React.PointerEvent<HTMLButtonElement>) {
     const start = logoPointerStartRef.current
-    if (!start || logoLongPressTimerRef.current == null) return
+    if (!start) return
     const dx = e.clientX - start.x
     const dy = e.clientY - start.y
     if (dx * dx + dy * dy > LONG_PRESS_MOVE_CANCEL_PX * LONG_PRESS_MOVE_CANCEL_PX) {
-      clearLogoLongPressTimer()
+      clearLogoPressTimers()
       stopLogoSpinRamp()
     }
   }
 
   function onLogoPointerEnd(e: React.PointerEvent<HTMLButtonElement>) {
-    clearLogoLongPressTimer()
+    clearLogoPressTimers()
     stopLogoSpinRamp()
     logoPointerStartRef.current = null
     try {
@@ -319,13 +323,7 @@ export default function App() {
     if (logoSuppressClickRef.current) {
       logoSuppressClickRef.current = false
       e.preventDefault()
-      return
     }
-    if (!session) {
-      e.preventDefault()
-      return
-    }
-    setAccountMenuOpen((o) => !o)
   }
 
   const refreshGraphFromSql = useCallback(
@@ -483,26 +481,26 @@ export default function App() {
         </div>
       ) : null}
 
-      <div className="app-logo-slot" ref={accountMenuRef}>
+      <div className="app-logo-slot">
         <button
           type="button"
           className={`app-logo-hit${interactivePhysics ? ' app-logo-physics-active' : ''}`}
-          aria-haspopup="dialog"
-          aria-expanded={accountMenuOpen}
-          aria-controls={accountMenuOpen ? 'account-menu' : undefined}
           aria-pressed={interactivePhysics}
           onPointerDown={onLogoPointerDown}
           onPointerMove={onLogoPointerMove}
           onPointerUp={onLogoPointerEnd}
           onPointerCancel={onLogoPointerEnd}
-          onLostPointerCapture={() => clearLogoLongPressTimer()}
+          onLostPointerCapture={() => {
+            clearLogoPressTimers()
+            stopLogoSpinRamp()
+          }}
           onClick={onLogoClick}
           aria-label={
             interactivePhysics
-              ? 'Account menu. Drag physics on; long press to turn off.'
+              ? 'Drag physics on. Press and hold to turn off.'
               : !session
-                ? 'Long press to enter drag physics, keep holding to sign in with GitHub.'
-                : 'Account menu. Long press to turn on drag physics.'
+                ? 'Hold to turn on drag physics, keep holding while it shakes, then keep holding until sign-in completes.'
+                : 'Hold to turn on drag physics, keep holding while it shakes, then keep holding until sign-out completes.'
           }
         >
           <span className="app-logo-frame">
@@ -514,33 +512,6 @@ export default function App() {
             />
           </span>
         </button>
-        {session && accountMenuOpen ? (
-          <div
-            id="account-menu"
-            className="auth-popover glass-chrome"
-            role="dialog"
-            aria-label={session ? 'Account' : 'Sign in'}
-          >
-            <div className="auth-popover-title">Account</div>
-            <span className="chrome-pill">@{session.login}</span>
-            <button
-              type="button"
-              className="chrome-btn"
-              onClick={() => {
-                setAccountMenuOpen(false)
-                void signOut()
-              }}
-            >
-              Sign out
-            </button>
-            <p className="auth-popover-hint auth-popover-hint-tight">
-              No hosted sign-out URL—this only ends the session in this browser.
-            </p>
-            <p className="auth-popover-hint auth-popover-hint-tight">
-              Expand by long-holding any node in the graph.
-            </p>
-          </div>
-        ) : null}
       </div>
 
       <div className="graph-host">
