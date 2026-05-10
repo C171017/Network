@@ -7,17 +7,46 @@ type Props = {
   setColorBy: (v: string) => void
   nodes?: Array<Record<string, unknown>>
   darkSurface?: boolean
+}
+
+export function PhysicsToggle({
+  darkSurface = false,
+  interactivePhysics = false,
+  setInteractivePhysics
+}: {
+  darkSurface?: boolean
   interactivePhysics?: boolean
   setInteractivePhysics?: (v: boolean) => void
+}) {
+  if (setInteractivePhysics == null) return null
+
+  return (
+    <div className={`physics-toggle-anchor${darkSurface ? ' dark-surface' : ''}`}>
+      <div className="physics-toggle-section">
+        <span id="physics-toggle-label" className="physics-toggle-label">
+          Drag physics
+        </span>
+        <button
+          type="button"
+          id="interactive-physics-toggle"
+          className={`physics-toggle${interactivePhysics ? ' is-on' : ''}`}
+          role="switch"
+          aria-checked={interactivePhysics}
+          aria-labelledby="physics-toggle-label"
+          onClick={() => setInteractivePhysics(!interactivePhysics)}
+        >
+          <span className="physics-toggle-knob" />
+        </button>
+      </div>
+    </div>
+  )
 }
 
 export default function ControlPanel({
   colorBy,
   setColorBy,
   nodes = [],
-  darkSurface = false,
-  interactivePhysics = false,
-  setInteractivePhysics
+  darkSurface = false
 }: Props) {
   const colorOptions = useMemo(() => {
     if (!nodes.length) return []
@@ -36,24 +65,6 @@ export default function ControlPanel({
 
   return (
     <div className={`control-panel${darkSurface ? ' dark-surface' : ''}`}>
-      {setInteractivePhysics != null && (
-        <div className="physics-toggle-section">
-          <span id="physics-toggle-label" className="physics-toggle-label">
-            Drag physics
-          </span>
-          <button
-            type="button"
-            id="interactive-physics-toggle"
-            className={`physics-toggle${interactivePhysics ? ' is-on' : ''}`}
-            role="switch"
-            aria-checked={interactivePhysics}
-            aria-labelledby="physics-toggle-label"
-            onClick={() => setInteractivePhysics(!interactivePhysics)}
-          >
-            <span className="physics-toggle-knob" />
-          </button>
-        </div>
-      )}
       <div className="filter-section">
         <label htmlFor="color-select" />
         <select

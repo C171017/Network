@@ -13,7 +13,7 @@
   user-select: none;
 }
 
-.control-panel.dark-surface .physics-toggle-label {
+.physics-toggle-anchor.dark-surface .physics-toggle-label {
   color: rgba(248, 250, 252, 0.9);
 }
 
@@ -69,13 +69,17 @@
   transform: translateX(18px);
 }
 
-.control-panel.dark-surface .physics-toggle {
+.physics-toggle-anchor.dark-surface .physics-toggle {
   border-color: rgba(255, 255, 255, 0.24);
   background: rgba(17, 24, 39, 0.45);
 }
 
-.control-panel.dark-surface .physics-toggle.is-on {
+.physics-toggle-anchor.dark-surface .physics-toggle.is-on {
   background: rgba(59, 130, 246, 0.5);
+}
+
+.physics-toggle-anchor .physics-toggle-section {
+  margin-bottom: 0;
 }
 
 .control-panel {

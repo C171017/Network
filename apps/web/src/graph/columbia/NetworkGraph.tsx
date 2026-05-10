@@ -7,7 +7,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
-import ControlPanel from './ControlPanel';
+import ControlPanel, { PhysicsToggle } from './ControlPanel';
 import Legend from './Legend';
 import './NetworkGraph.css';
 import {
@@ -1498,14 +1498,18 @@ const NetworkGraph = ({
         <svg ref={svgRef} className="network-graph"
           aria-label="Network graph visualization - draggable view"></svg>
 
+        <PhysicsToggle
+          darkSurface={darkSurface}
+          interactivePhysics={interactivePhysics}
+          setInteractivePhysics={setInteractivePhysics}
+        />
+
         <div ref={controlsRef} className="controls-legend-container">
           <ControlPanel
             colorBy={colorBy}
             setColorBy={setColorBy}
             nodes={data.nodes}
             darkSurface={darkSurface}
-            interactivePhysics={interactivePhysics}
-            setInteractivePhysics={setInteractivePhysics}
           />
           <Legend colorBy={colorBy} data={data} darkSurface={darkSurface} />
         </div>
