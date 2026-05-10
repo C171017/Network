@@ -120,10 +120,17 @@ function mergeGraphDataAdditive(
 export default function App() {
   const publicInitialMaxNodes = readPublicInitialMaxNodes()
   const [session, setSession] = useState<SessionInfo | null>(null)
+  /**
+   * False until first `getSession()` finishes — avoids fetching the public snapshot while signed-in
+   * session restore is pending (fixes refresh flashing many guest nodes briefly).
+   */
+  const [authSessionResolved, setAuthSessionResolved] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [graphError, setGraphError] = useState<string | null>(null)
   const [graphLoading, setGraphLoading] = useState(true)
   const [graph, setGraph] = useState<GraphData | null>(null)
+  const graphRefForRefresh = useRef<GraphData | null>(null)
+  graphRefForRefresh.current = graph
   /** Matches graph chrome (dark inner disk vs light outer); default dark for page background before graph reports. */
   const [, setUiSurfaceDark] = useState(true)
   /** Graph “drag physics” — toggled by long-pressing the logo (logo uses its own timings). */
@@ -149,25 +156,33 @@ export default function App() {
     if (!supabase) return
 
     let cancelled = false
-    void supabase.auth.getSession().then(({ data }) => {
-      if (cancelled) return
-      const s = data.session
-      if (!s?.access_token || !s.user) return
-      const gh = s.provider_token
-      if (!gh) {
-        setError(
-          'Signed in, but GitHub provider_token is missing. In Supabase Dashboard → Auth → Providers → GitHub, ensure OAuth is enabled; then sign out and sign in again.',
-        )
-        return
-      }
-      const login = readGithubLoginFromUser(s.user)
-      if (!login) {
-        setError('Could not infer GitHub login from Supabase user metadata.')
-        return
-      }
-      setSession({ supabaseAccessToken: s.access_token, githubAccessToken: gh, login })
-      setError(null)
-    })
+    void supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (cancelled) return
+        const s = data.session
+        if (!s?.access_token || !s.user) return
+        const gh = s.provider_token
+        if (!gh) {
+          setError(
+            'Signed in, but GitHub provider_token is missing. In Supabase Dashboard → Auth → Providers → GitHub, ensure OAuth is enabled; then sign out and sign in again.',
+          )
+          return
+        }
+        const login = readGithubLoginFromUser(s.user)
+        if (!login) {
+          setError('Could not infer GitHub login from Supabase user metadata.')
+          return
+        }
+        setSession({ supabaseAccessToken: s.access_token, githubAccessToken: gh, login })
+        setError(null)
+      })
+      .catch(() => {
+        /* allow app to proceed as guest when session read fails */
+      })
+      .finally(() => {
+        if (!cancelled) setAuthSessionResolved(true)
+      })
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
       if (!s?.access_token || !s.user) {
@@ -357,16 +372,20 @@ export default function App() {
   )
 
   useEffect(() => {
+    if (!authSessionResolved) return undefined
+
     let cancelled = false
     const id = window.setTimeout(() => {
       if (cancelled) return
-      void refreshGraphFromSql()
+      /* Avoid unloading the graph placeholder while swapping public ↔ owned (reduces flicker). */
+      const suppressSpinner = (graphRefForRefresh.current?.nodes?.length ?? 0) > 0
+      void refreshGraphFromSql({ suppressLoadingSpinner: suppressSpinner })
     }, 0)
     return () => {
       cancelled = true
       window.clearTimeout(id)
     }
-  }, [refreshGraphFromSql])
+  }, [refreshGraphFromSql, authSessionResolved])
 
   async function signIn() {
     if (!supabase) return

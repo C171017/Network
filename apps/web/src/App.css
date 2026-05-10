@@ -63,10 +63,66 @@ textarea {
 }
 
 .app-logo-frame {
-  display: block;
+  position: relative;
+  display: inline-block;
   line-height: 0;
   transition: transform 0.2s ease;
   transform-origin: center center;
+  isolation: isolate;
+}
+
+/* Glowing ring (centered ellipse around logo bounds); tune via inset / border / box-shadow. */
+.app-logo-frame::before {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+  inset: -10px;
+  border-radius: 50%;
+  border: 2px solid rgba(192, 132, 252, 0.5);
+  box-shadow:
+    0 0 10px rgba(192, 132, 252, 0.55),
+    0 0 22px rgba(124, 58, 237, 0.35),
+    0 0 36px rgba(91, 33, 182, 0.2);
+  opacity: 0.95;
+  transition: opacity 0.35s ease, box-shadow 0.35s ease, border-color 0.35s ease;
+}
+
+.app-logo-hit:hover .app-logo-frame::before,
+.app-logo-hit:focus-visible .app-logo-frame::before {
+  border-color: rgba(216, 180, 254, 0.65);
+  box-shadow:
+    0 0 12px rgba(216, 180, 254, 0.65),
+    0 0 26px rgba(167, 139, 250, 0.45),
+    0 0 44px rgba(109, 40, 217, 0.28);
+}
+
+.app-logo-hit.app-logo-physics-active .app-logo-frame::before {
+  border-color: rgba(233, 213, 255, 0.75);
+  box-shadow:
+    0 0 14px rgba(233, 213, 255, 0.7),
+    0 0 30px rgba(192, 132, 252, 0.5),
+    0 0 48px rgba(124, 58, 237, 0.35);
+  animation: app-logo-ring-pulse 2.2s ease-in-out infinite;
+}
+
+/* Stronger halo while OAuth spin ramp is active (same moment as `.app-logo-boost-spin`). */
+.app-logo-frame:has(.app-logo-boost-spin)::before {
+  border-color: rgba(250, 245, 255, 0.88);
+  box-shadow:
+    0 0 16px rgba(250, 245, 255, 0.75),
+    0 0 34px rgba(216, 180, 254, 0.6),
+    0 0 56px rgba(139, 92, 246, 0.45);
+}
+
+@keyframes app-logo-ring-pulse {
+  0%,
+  100% {
+    opacity: 0.82;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .app-logo-hit:hover .app-logo-frame,
@@ -114,9 +170,15 @@ textarea {
   .app-logo-hit .app-logo.app-logo-boost-spin {
     animation: none;
   }
+
+  .app-logo-hit.app-logo-physics-active .app-logo-frame::before {
+    animation: none;
+  }
 }
 
 .app-logo {
+  position: relative;
+  z-index: 1;
   display: block;
   height: clamp(48px, 8.45vw, 68px);
   width: auto;

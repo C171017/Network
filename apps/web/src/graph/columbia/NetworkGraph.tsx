@@ -8,8 +8,6 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
-import ControlPanel from './ControlPanel';
-import Legend from './Legend';
 import './NetworkGraph.css';
 import {
   buildColorMaps,
@@ -546,14 +544,14 @@ function renderNodeVisual(nodeGroup, d, nodePathInfo, options) {
 
 // Define zoom settings (split mobile vs desktop).
 // Values below default to the existing behavior; tweak separately as needed.
-const ZOOM_MIN_DESKTOP = 0.03;
-const ZOOM_MAX_DESKTOP = 1.8;
+const ZOOM_MIN_DESKTOP = 0.04;
+const ZOOM_MAX_DESKTOP = 1.55;
 const ZOOM_MIN_MOBILE = 0.1;
 const ZOOM_MAX_MOBILE = 1.2;
 
 // Multiplier applied to the computed "fit-to-viewport" initial zoom scale.
 // (1 keeps current behavior; increase >1 to zoom in more initially on mobile/desktop.)
-const INITIAL_ZOOM_MULTIPLIER_DESKTOP = 1.8;
+const INITIAL_ZOOM_MULTIPLIER_DESKTOP = 1.55;
 const INITIAL_ZOOM_MULTIPLIER_MOBILE = 1.2;
 
 // Cluster mode: when zoomed below the viewport-specific threshold, large groups collapse
@@ -679,14 +677,21 @@ const BACKGROUND_IMAGE_MAX_X = BACKGROUND_IMAGE_X + BACKGROUND_IMAGE_SIZE;
 const BACKGROUND_IMAGE_MAX_Y = BACKGROUND_IMAGE_Y + BACKGROUND_IMAGE_SIZE;
 
 /**
- * Pan inset inside the background image rectangle (world units). The cosmos art reads with
- * darker bands at the top/bottom when panned extreme; narrowing Y stops those from occupying the view.
+ * Single knob for pan limits: same inset on left, right, top, and bottom (world units),
+ * as a fraction of `BACKGROUND_IMAGE_SIZE`. Range (0, 0.5); higher = tighter pan box.
+ * (Background image width and height both use BACKGROUND_IMAGE_SIZE, so symmetry matches.)
  */
-const BACKGROUND_PAN_INSET_Y_TOP = BACKGROUND_IMAGE_SIZE * 0.06;
-const BACKGROUND_PAN_INSET_Y_BOTTOM = BACKGROUND_IMAGE_SIZE * 0.06;
+const BACKGROUND_PAN_BOUNDARY_EDGE_INSET_FRACTION = 0.09;
+const BACKGROUND_PAN_BOUNDARY_EDGE_INSET = BACKGROUND_IMAGE_SIZE * BACKGROUND_PAN_BOUNDARY_EDGE_INSET_FRACTION;
 const BACKGROUND_PAN_EXTENT_WORLD = [
-  [BACKGROUND_IMAGE_X, BACKGROUND_IMAGE_Y + BACKGROUND_PAN_INSET_Y_TOP],
-  [BACKGROUND_IMAGE_MAX_X, BACKGROUND_IMAGE_MAX_Y - BACKGROUND_PAN_INSET_Y_BOTTOM]
+  [
+    BACKGROUND_IMAGE_X + BACKGROUND_PAN_BOUNDARY_EDGE_INSET,
+    BACKGROUND_IMAGE_Y + BACKGROUND_PAN_BOUNDARY_EDGE_INSET,
+  ],
+  [
+    BACKGROUND_IMAGE_MAX_X - BACKGROUND_PAN_BOUNDARY_EDGE_INSET,
+    BACKGROUND_IMAGE_MAX_Y - BACKGROUND_PAN_BOUNDARY_EDGE_INSET,
+  ],
 ];
 
 /** Widen the logo’s dark zone vs panel math so blackback kicks in at the edge of the ramp, not only when fully black. */
@@ -701,7 +706,6 @@ const LOGO_DARK_DISK_RADIUS_FACTOR = 1.06;
 
 const NetworkGraph = ({
   colorBy,
-  setColorBy,
   data,
   interactivePhysics = false,
   authenticatedSession = false,
@@ -711,11 +715,12 @@ const NetworkGraph = ({
   const svgRef = useRef();
   const visualizationAreaRef = useRef(null);
   const hoverStatusRef = useRef(null);
-  const controlsRef = useRef(null);
   const zoomRef = useRef(null);
   const zoomCleanupRef = useRef(null);
   const interactivePhysicsRef = useRef(interactivePhysics);
   interactivePhysicsRef.current = interactivePhysics;
+  const authenticatedSessionRef = useRef(authenticatedSession);
+  authenticatedSessionRef.current = authenticatedSession;
   // Latest onNodeCrawl callback, accessed inside long-press handlers without rebinding.
   const onNodeCrawlRef = useRef(onNodeCrawl);
   useEffect(() => {
@@ -1324,19 +1329,17 @@ const NetworkGraph = ({
           NODE_RADIUS + 20,
           movableLimit - centreDist - NODE_RADIUS - 28
         );
+        // Same within-group dispersion as public/guest graphs (reuse `canvasUtil`; no auth-only tightening).
         const canvasUtil = Math.min(
           0.94,
           0.14 + 0.84 * (1 - Math.exp(-totalNodesForLayout / 115))
         );
-        const sessionUtil = authenticatedSession
-          ? Math.min(0.97, canvasUtil + 0.07)
-          : canvasUtil;
         const sizeDrivenRadius =
           95 + NODE_RADIUS * sqrtG * (2.05 + 0.72 * sqrtTotalNodes);
         const legacyRadialFloor = Math.max(groupR[gi] - 36, 28);
         const radialLimit = Math.max(
           legacyRadialFloor,
-          Math.min(diskBudget * sessionUtil, sizeDrivenRadius)
+          Math.min(diskBudget * canvasUtil, sizeDrivenRadius)
         );
 
         const minSepBase = Math.min(
@@ -1465,8 +1468,8 @@ const NetworkGraph = ({
           .on('drag', dragged)
           .on('end', dragended));
 
-      // Guest desktop: full graph at all zoom levels. Mobile guests: same cluster-at-low-zoom path as auth (better FPS).
-      const clusterModeEnabled = authenticatedSession || isMobile;
+      // Desktop: nodes always visible (no zoom-out clouds). Mobile: cluster-at-low-zoom for FPS — same guest & auth.
+      const clusterModeEnabled = isMobile;
 
       // ── Cluster layer (zoom-out cloud blobs) ─────────────────────────────
       // One <g class="cluster"> per qualifying group. They start parked, then
@@ -1684,25 +1687,20 @@ const NetworkGraph = ({
           return dist < CANVAS_WHITE_OUTER_RADIUS * 1.2 * LOGO_DARK_DISK_RADIUS_FACTOR;
         };
 
-        const controlsEl = controlsRef.current;
-        if (controlsEl) {
-          const panelRect = controlsEl.getBoundingClientRect();
-          const sx = panelRect.left + panelRect.width / 2 - graphRect.left;
-          const sy = panelRect.top + panelRect.height / 2 - graphRect.top;
-          const panelIsDark = screenPxIsDark(sx, sy);
-          if (panelIsDark !== lastPanelUiIsDark) {
-            lastPanelUiIsDark = panelIsDark;
-            setDarkSurface(panelIsDark);
-          }
-        }
-
-        // Centered app logo: sample viewport center in SVG-relative client pixels.
+        // Centered chrome (logo): sample viewport center in SVG-relative client pixels.
         const logoCx =
           typeof window !== 'undefined' ? window.innerWidth / 2 : graphRect.left + graphRect.width / 2;
         const logoCy =
           typeof window !== 'undefined' ? window.innerHeight / 2 : graphRect.top + graphRect.height / 2;
         const logoSx = logoCx - graphRect.left;
         const logoSy = logoCy - graphRect.top;
+
+        // Hover / graph chrome reads light vs dark disk under viewport center (no control panel anchor).
+        const panelIsDark = screenPxIsDark(logoSx, logoSy);
+        if (panelIsDark !== lastPanelUiIsDark) {
+          lastPanelUiIsDark = panelIsDark;
+          setDarkSurface(panelIsDark);
+        }
         const logoIsDark = logoPxIsDark(logoSx, logoSy);
         if (logoIsDark !== lastLogoUiIsDark) {
           lastLogoUiIsDark = logoIsDark;
@@ -1912,7 +1910,8 @@ const NetworkGraph = ({
 
       let suppressNextClick = false;
 
-      const singleClickFocusEnabled = () => !authenticatedSession && interactivePhysicsRef.current;
+      const singleClickFocusEnabled = () =>
+        !authenticatedSessionRef.current && interactivePhysicsRef.current;
 
       node.on('click', (event, d) => {
         if (suppressNextClick) {
@@ -2264,7 +2263,7 @@ const NetworkGraph = ({
       renderedTopologySigRef.current = topologySignature(live.nodes, live.links ?? []);
 
       graphLiveApiRef.current = {
-        session: authenticatedSession,
+        session: authenticatedSessionRef.current,
         getPersistableZoom: () => d3.zoomTransform(svgNodeEl),
         tryIncrementalUpdate: (nextDataset) => {
           const nextLinksList = nextDataset.links ?? [];
@@ -2612,9 +2611,13 @@ const NetworkGraph = ({
         zoomCleanupRef.current = null;
       }
     };
-    // Rebuild from scratch when auth changes, layout token bumps, or session-specific defaults shift.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- graphLiveApiRef carries streaming updates
-  }, [authenticatedSession, graphRebuildKey]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- graphLiveApiRef + streaming carries updates; omit auth to avoid double-rebuild flicker when session flips before new graph data.
+  }, [graphRebuildKey]);
+
+  useEffect(() => {
+    const api = graphLiveApiRef.current;
+    if (api) api.session = authenticatedSession;
+  }, [authenticatedSession]);
 
   // Monotonic dataset growth (streaming expand): update simulation/DOM without resetting zoom.
   useEffect(() => {
@@ -2712,7 +2715,6 @@ const NetworkGraph = ({
   }, [colorBy, colorMaps, getNodeColor, createNodePath]);
 
   const desktopSafariClass = isDesktopSafariBrowser() ? ' desktop-safari' : '';
-  const showControlsAndLegend = authenticatedSession;
 
   return (
     <div className={`network-container${desktopSafariClass}`}>
@@ -2727,19 +2729,6 @@ const NetworkGraph = ({
           aria-live="polite"
           style={{ display: 'none' }}
         />
-
-        {showControlsAndLegend ? (
-          <div ref={controlsRef} className="controls-legend-container">
-            <ControlPanel
-              colorBy={colorBy}
-              setColorBy={setColorBy}
-              nodes={data.nodes}
-              darkSurface={darkSurface}
-              hideDegreeOption={false}
-            />
-            <Legend colorBy={colorBy} colorMaps={colorMaps} darkSurface={darkSurface} />
-          </div>
-        ) : null}
       </div>
     </div>
   );

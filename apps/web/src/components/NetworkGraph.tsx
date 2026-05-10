@@ -1,6 +1,7 @@
-import { useState } from 'react'
 import ColumbiaNetworkGraph from '../graph/columbia/NetworkGraph'
 import type { VisualizationGraphData } from '../graph/columbia/graphAdapter'
+
+const DEFAULT_COLOR_BY = 'degree'
 
 type Props = {
   data: VisualizationGraphData | null
@@ -20,12 +21,10 @@ export default function NetworkGraph({
   interactivePhysics,
   authenticatedSession = false,
 }: Props) {
-  const [colorBy, setColorBy] = useState('degree')
   if (!data?.nodes?.length) return null
   return (
     <ColumbiaNetworkGraph
-      colorBy={colorBy}
-      setColorBy={setColorBy}
+      colorBy={DEFAULT_COLOR_BY}
       data={data}
       interactivePhysics={interactivePhysics}
       authenticatedSession={authenticatedSession}
