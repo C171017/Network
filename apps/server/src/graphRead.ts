@@ -3,17 +3,24 @@ import { githubProfilePageUrl } from "./githubProfileUrl.js";
 import type { EdgeDTO, GraphDTO, NodeDTO } from "./graphTypes.js";
 
 const DEFAULT_MAX_NODES = 8000;
-const DEFAULT_MAX_EDGES = 50000;
 
-function readCaps(): { maxNodes: number; maxEdges: number } {
+/** No row cap on edges when unset; set `GRAPH_READ_MAX_EDGES` to a positive integer to limit. */
+function parseMaxEdges(): number | null {
+  const raw = process.env.GRAPH_READ_MAX_EDGES?.trim();
+  if (raw === undefined || raw === "") return null;
+  const lower = raw.toLowerCase();
+  if (raw === "0" || lower === "unlimited" || lower === "none" || lower === "off") return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.min(Math.max(Math.floor(n), 1), 500_000);
+}
+
+function readCaps(): { maxNodes: number; maxEdges: number | null } {
   const maxNodes = Math.min(
     Math.max(Number(process.env.GRAPH_READ_MAX_NODES ?? DEFAULT_MAX_NODES) || DEFAULT_MAX_NODES, 1),
     100_000,
   );
-  const maxEdges = Math.min(
-    Math.max(Number(process.env.GRAPH_READ_MAX_EDGES ?? DEFAULT_MAX_EDGES) || DEFAULT_MAX_EDGES, 1),
-    500_000,
-  );
+  const maxEdges = parseMaxEdges();
   return { maxNodes, maxEdges };
 }
 
@@ -114,7 +121,7 @@ export function readFullGraph(db: Database.Database): GraphDTO {
        WHERE e.kind = 'follows'
        LIMIT ?`,
     )
-    .all(maxNodes, maxEdges) as Array<{ source_id: number; target_id: number }>;
+    .all(maxNodes, maxEdges ?? -1) as Array<{ source_id: number; target_id: number }>;
 
   const idSet = new Set(nodeRows.map((r) => r.github_id));
   const edges: EdgeDTO[] = [];
@@ -214,7 +221,7 @@ export function readReachableGraph(db: Database.Database, rootLogin: string): Gr
          WHERE e.kind = 'follows'
          LIMIT ?`,
       )
-      .all(maxEdges) as Array<{ source_id: number; target_id: number }>;
+      .all(maxEdges ?? -1) as Array<{ source_id: number; target_id: number }>;
 
     const nodes: NodeDTO[] = nodeRows.map((r) => rowToNode(r, r.github_id === rootRow.github_id));
     const edges: EdgeDTO[] = edgeRows.map((e) => ({
