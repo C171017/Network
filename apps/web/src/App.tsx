@@ -120,27 +120,8 @@ export default function App() {
   useEffect(() => {
     if (!supabase) return
 
-    let cancelled = false
-    void supabase.auth.getSession().then(({ data }) => {
-      if (cancelled) return
-      const s = data.session
-      if (!s?.access_token || !s.user) return
-      const gh = s.provider_token
-      if (!gh) {
-        setError(
-          'Signed in, but GitHub provider_token is missing. In Supabase Dashboard → Auth → Providers → GitHub, ensure OAuth is enabled; then sign out and sign in again.',
-        )
-        return
-      }
-      const login = readGithubLoginFromUser(s.user)
-      if (!login) {
-        setError('Could not infer GitHub login from Supabase user metadata.')
-        return
-      }
-      setSession({ supabaseAccessToken: s.access_token, githubAccessToken: gh, login })
-      setError(null)
-    })
-
+    // Use a single source of truth for auth state. Mixing getSession() with
+    // onAuthStateChange can race and briefly reapply stale sessions.
     const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
       if (!s?.access_token || !s.user) {
         setSession(null)
@@ -167,7 +148,6 @@ export default function App() {
     })
 
     return () => {
-      cancelled = true
       sub.subscription.unsubscribe()
     }
   }, [])
