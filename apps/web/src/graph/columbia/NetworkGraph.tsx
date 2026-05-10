@@ -2150,6 +2150,7 @@ const NetworkGraph = ({
             }
           }
 
+          // Dummy comment: keep this local placement helper easy to locate while testing.
           function pickXYForNewNode(nodeId) {
             const anchors = [];
             for (let li = 0; li < nextLinksList.length; li += 1) {
