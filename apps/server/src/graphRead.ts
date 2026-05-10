@@ -2,7 +2,12 @@ import Database from "better-sqlite3";
 import { githubProfilePageUrl } from "./githubProfileUrl.js";
 import type { EdgeDTO, GraphDTO, NodeDTO } from "./graphTypes.js";
 
-const DEFAULT_MAX_NODES = 8000;
+/**
+ * Initial-screen node budget. Each read endpoint randomly samples up to this many
+ * nodes (signed-in reads always pin the user's root). Override at runtime with
+ * `GRAPH_READ_MAX_NODES`.
+ */
+const DEFAULT_MAX_NODES = 400;
 
 /** No row cap on edges when unset; set `GRAPH_READ_MAX_EDGES` to a positive integer to limit. */
 function parseMaxEdges(): number | null {
@@ -89,20 +94,17 @@ const NODE_SELECT = `github_id, login, depth, expanded, avatar_url, name, bio, c
 const NODE_SELECT_N = `n.github_id, n.login, n.depth, n.expanded, n.avatar_url, n.name, n.bio, n.company, n.location, n.blog, n.html_url, n.profile_json`;
 
 /**
- * All nodes (row-capped), then follows edges whose endpoints lie in that capped node set (edge-capped).
- * Uses CTEs to avoid huge `IN (...)` parameter lists.
+ * Random sample of up to `maxNodes` rows from `nodes`, then follows edges whose
+ * **both** endpoints fall in that sampled set. Sampling is uniform across the
+ * full table so the graph the user sees on initial load is a representative
+ * slice rather than the first N by `github_id`.
  */
 export function readFullGraph(db: Database.Database): GraphDTO {
   const { maxNodes, maxEdges } = readCaps();
   const now = new Date().toISOString();
 
   const nodeRows = db
-    .prepare(
-      `WITH capped AS (
-         SELECT ${NODE_SELECT} FROM nodes ORDER BY github_id LIMIT ?
-       )
-       SELECT * FROM capped`,
-    )
+    .prepare(`SELECT ${NODE_SELECT} FROM nodes ORDER BY RANDOM() LIMIT ?`)
     .all(maxNodes) as NodeRow[];
 
   if (nodeRows.length === 0) {
@@ -122,54 +124,56 @@ export function readFullGraph(db: Database.Database): GraphDTO {
   }
 
   const nodes: NodeDTO[] = nodeRows.map((r) => rowToNode(r, false));
+  const ids = nodeRows.map((r) => r.github_id);
 
-  const edgeRows = db
-    .prepare(
-      `WITH capped AS (SELECT github_id FROM nodes ORDER BY github_id LIMIT ?)
-       SELECT e.source_id, e.target_id
-       FROM edges e
-       JOIN capped cs ON cs.github_id = e.source_id
-       JOIN capped ct ON ct.github_id = e.target_id
-       WHERE e.kind = 'follows'
-       LIMIT ?`,
-    )
-    .all(maxNodes, maxEdges ?? -1) as Array<{ source_id: number; target_id: number }>;
+  ensureNodeSubsetTemp(db);
+  insertNodeSubsetIds(db, ids);
 
-  const idSet = new Set(nodeRows.map((r) => r.github_id));
-  const edges: EdgeDTO[] = [];
-  for (const e of edgeRows) {
-    if (!idSet.has(e.source_id) || !idSet.has(e.target_id)) continue;
-    edges.push({
+  try {
+    const edgeRows = db
+      .prepare(
+        `SELECT e.source_id, e.target_id
+         FROM edges e
+         INNER JOIN _graph_node_subset s ON s.id = e.source_id
+         INNER JOIN _graph_node_subset t ON t.id = e.target_id
+         WHERE e.kind = 'follows'
+         LIMIT ?`,
+      )
+      .all(maxEdges ?? -1) as Array<{ source_id: number; target_id: number }>;
+
+    const edges: EdgeDTO[] = edgeRows.map((e) => ({
       sourceGithubId: e.source_id,
       targetGithubId: e.target_id,
-      kind: "follows",
-    });
-  }
+      kind: "follows" as const,
+    }));
 
-  return {
-    rootLogin: "",
-    generatedAt: now,
-    caps: { maxFollowers: 0, maxFollowing: 0 },
-    truncation: {
-      followersTotal: null,
-      followingTotal: null,
-      followersReturned: 0,
-      followingReturned: edges.length,
-    },
-    nodes,
-    edges,
-  };
+    return {
+      rootLogin: "",
+      generatedAt: now,
+      caps: { maxFollowers: 0, maxFollowing: 0 },
+      truncation: {
+        followersTotal: null,
+        followingTotal: null,
+        followersReturned: 0,
+        followingReturned: edges.length,
+      },
+      nodes,
+      edges,
+    };
+  } finally {
+    db.exec(`DELETE FROM _graph_node_subset`);
+  }
 }
 
-function ensureReachTemp(db: Database.Database): void {
+function ensureNodeSubsetTemp(db: Database.Database): void {
   db.exec(`
-    CREATE TEMP TABLE IF NOT EXISTS _graph_reach_ids (id INTEGER PRIMARY KEY);
-    DELETE FROM _graph_reach_ids;
+    CREATE TEMP TABLE IF NOT EXISTS _graph_node_subset (id INTEGER PRIMARY KEY);
+    DELETE FROM _graph_node_subset;
   `);
 }
 
-function insertReachIds(db: Database.Database, ids: number[]): void {
-  const stmt = db.prepare(`INSERT OR IGNORE INTO _graph_reach_ids (id) VALUES (?)`);
+function insertNodeSubsetIds(db: Database.Database, ids: number[]): void {
+  const stmt = db.prepare(`INSERT OR IGNORE INTO _graph_node_subset (id) VALUES (?)`);
   const run = db.transaction((list: number[]) => {
     for (const id of list) stmt.run(id);
   });
@@ -177,7 +181,10 @@ function insertReachIds(db: Database.Database, ids: number[]): void {
 }
 
 /**
- * Directed reachable set from `rootLogin` along follows edges (source → target), BFS.
+ * Directed reachable set from `rootLogin` along follows edges (source → target),
+ * collected via BFS. If the reachable set exceeds `maxNodes`, the result is
+ * uniformly random-sampled down to that size — except the root is always
+ * included, so the visualization stays anchored.
  */
 export function readReachableGraph(db: Database.Database, rootLogin: string): GraphDTO {
   const normalized = rootLogin.trim().toLowerCase();
@@ -200,27 +207,26 @@ export function readReachableGraph(db: Database.Database, rootLogin: string): Gr
   const queue = [rootRow.github_id];
   const followStmt = db.prepare(`SELECT target_id FROM edges WHERE kind = 'follows' AND source_id = ?`);
 
-  while (queue.length > 0 && visited.size < maxNodes) {
+  while (queue.length > 0) {
     const u = queue.shift()!;
     const targets = followStmt.all(u) as Array<{ target_id: number }>;
     for (const { target_id: t } of targets) {
       if (visited.has(t)) continue;
       visited.add(t);
       queue.push(t);
-      if (visited.size >= maxNodes) break;
     }
   }
 
-  const ids = [...visited];
-  ensureReachTemp(db);
-  insertReachIds(db, ids);
+  const ids = sampleIdsKeepingRoot([...visited], rootRow.github_id, maxNodes);
+  ensureNodeSubsetTemp(db);
+  insertNodeSubsetIds(db, ids);
 
   try {
     const nodeRows = db
       .prepare(
         `SELECT ${NODE_SELECT_N}
          FROM nodes n
-         INNER JOIN _graph_reach_ids g ON g.id = n.github_id`,
+         INNER JOIN _graph_node_subset g ON g.id = n.github_id`,
       )
       .all() as NodeRow[];
 
@@ -228,8 +234,8 @@ export function readReachableGraph(db: Database.Database, rootLogin: string): Gr
       .prepare(
         `SELECT e.source_id, e.target_id
          FROM edges e
-         INNER JOIN _graph_reach_ids s ON s.id = e.source_id
-         INNER JOIN _graph_reach_ids t ON t.id = e.target_id
+         INNER JOIN _graph_node_subset s ON s.id = e.source_id
+         INNER JOIN _graph_node_subset t ON t.id = e.target_id
          WHERE e.kind = 'follows'
          LIMIT ?`,
       )
@@ -256,6 +262,21 @@ export function readReachableGraph(db: Database.Database, rootLogin: string): Gr
       edges,
     };
   } finally {
-    db.exec(`DELETE FROM _graph_reach_ids`);
+    db.exec(`DELETE FROM _graph_node_subset`);
   }
+}
+
+/**
+ * Uniform partial Fisher–Yates: returns up to `limit` ids from `all`, always
+ * including `keepId`. If the set is already within the cap, returns it as-is.
+ */
+function sampleIdsKeepingRoot(all: number[], keepId: number, limit: number): number[] {
+  if (all.length <= limit) return all;
+  const others = all.filter((id) => id !== keepId);
+  const want = Math.max(0, limit - 1);
+  for (let i = 0; i < want && i < others.length; i++) {
+    const j = i + Math.floor(Math.random() * (others.length - i));
+    [others[i], others[j]] = [others[j]!, others[i]!];
+  }
+  return [keepId, ...others.slice(0, want)];
 }
