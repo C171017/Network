@@ -19,6 +19,11 @@ const LOGO_PHYSICS_PRESS_MS = 380
 /** After physics (shake) is on, hold this long before the auth spin ramp can begin. */
 const LOGO_PHYSICS_DWELL_BEFORE_AUTH_MS = 1100
 
+/** Easter egg: single-click the logo this many times (across signed-in/public) to play Pink Moon. */
+const LOGO_PINK_MOON_CLICK_THRESHOLD = 10
+/** Public folder asset; encodeURI handles spaces. Brackets are valid in URL paths. */
+const PINK_MOON_AUDIO_SRC = encodeURI('/Nick Drake - Pink Moon [xqe6TF2y8i4].m4a')
+
 type SessionInfo = {
   supabaseAccessToken: string
   githubAccessToken: string
@@ -112,6 +117,8 @@ export default function App() {
   const [logoBoostSpinDurationMs, setLogoBoostSpinDurationMs] = useState(900)
   const [focusAuthNodeNonce, setFocusAuthNodeNonce] = useState(0)
   const sessionRef = useRef<SessionInfo | null>(null)
+  const logoClickCountRef = useRef(0)
+  const pinkMoonAudioRef = useRef<HTMLAudioElement | null>(null)
 
   useEffect(() => {
     sessionRef.current = session
@@ -299,12 +306,33 @@ export default function App() {
     }
   }
 
+  function maybePlayPinkMoon() {
+    logoClickCountRef.current += 1
+    if (logoClickCountRef.current < LOGO_PINK_MOON_CLICK_THRESHOLD) return
+    logoClickCountRef.current = 0
+    let audio = pinkMoonAudioRef.current
+    if (!audio) {
+      audio = new Audio(PINK_MOON_AUDIO_SRC)
+      audio.preload = 'auto'
+      pinkMoonAudioRef.current = audio
+    }
+    try {
+      audio.currentTime = 0
+    } catch {
+      /* some browsers throw before metadata loads; ignore */
+    }
+    void audio.play().catch(() => {
+      /* autoplay policies may block; user gesture should normally allow it */
+    })
+  }
+
   function onLogoClick(e: React.MouseEvent<HTMLButtonElement>) {
     if (logoSuppressClickRef.current) {
       logoSuppressClickRef.current = false
       e.preventDefault()
       return
     }
+    maybePlayPinkMoon()
     if (!sessionRef.current) return
     setFocusAuthNodeNonce((n) => n + 1)
   }

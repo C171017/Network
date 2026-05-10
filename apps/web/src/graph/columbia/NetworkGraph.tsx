@@ -542,17 +542,11 @@ function renderNodeVisual(nodeGroup, d, nodePathInfo, options) {
 //////////////////////////////////////////////////////
 
 
-// Define zoom settings (split mobile vs desktop).
-// Values below default to the existing behavior; tweak separately as needed.
-const ZOOM_MIN_DESKTOP = 0.04;
+// Zoom: max pinch/zoom-in is capped per breakpoint. Min zoom (= initial load scale) is derived
+// from the same viewport fit as `translate(width/2,h/2).scale(k).translate(-cx,-cy)` so the
+// d3 zoom factor `k` at start always equals scaleExtent[0] (cannot zoom out past the fitted view).
 const ZOOM_MAX_DESKTOP = 1.55;
-const ZOOM_MIN_MOBILE = 0.1;
 const ZOOM_MAX_MOBILE = 1.2;
-
-// Multiplier applied to the computed "fit-to-viewport" initial zoom scale.
-// (1 keeps current behavior; increase >1 to zoom in more initially on mobile/desktop.)
-const INITIAL_ZOOM_MULTIPLIER_DESKTOP = 1.55;
-const INITIAL_ZOOM_MULTIPLIER_MOBILE = 1.2;
 
 // Cluster mode: when zoomed below the viewport-specific threshold, large groups collapse
 // into a single organic "cloud" shape and smaller groups disappear entirely.
@@ -681,7 +675,7 @@ const BACKGROUND_IMAGE_MAX_Y = BACKGROUND_IMAGE_Y + BACKGROUND_IMAGE_SIZE;
  * as a fraction of `BACKGROUND_IMAGE_SIZE`. Range (0, 0.5); higher = tighter pan box.
  * (Background image width and height both use BACKGROUND_IMAGE_SIZE, so symmetry matches.)
  */
-const BACKGROUND_PAN_BOUNDARY_EDGE_INSET_FRACTION = 0.09;
+const BACKGROUND_PAN_BOUNDARY_EDGE_INSET_FRACTION = 0.27;
 const BACKGROUND_PAN_BOUNDARY_EDGE_INSET = BACKGROUND_IMAGE_SIZE * BACKGROUND_PAN_BOUNDARY_EDGE_INSET_FRACTION;
 const BACKGROUND_PAN_EXTENT_WORLD = [
   [
@@ -823,8 +817,14 @@ const NetworkGraph = ({
     const node = svg.node();
 
     const mobile = isMobileViewport();
-    const ZOOM_MIN = mobile ? ZOOM_MIN_MOBILE : ZOOM_MIN_DESKTOP;
     const ZOOM_MAX = mobile ? ZOOM_MAX_MOBILE : ZOOM_MAX_DESKTOP;
+
+    const scaleX = containerWidth / VISUAL_SCENE_EXTENT;
+    const scaleY = containerHeight / VISUAL_SCENE_EXTENT;
+    const fitScale = Math.min(scaleX, scaleY);
+    // If the viewport is so large that "fit entire scene" would exceed max zoom-in, clamp to max;
+    // min and max then coincide (no zoom headroom outward).
+    const ZOOM_MIN = Math.min(fitScale, ZOOM_MAX);
 
     // onTransformChange(transform, phase): `active` during gesture; `end` when d3-zoom ends (wheel stop, pinch end, transition end).
     const zoom = d3.zoom()
@@ -850,16 +850,9 @@ const NetworkGraph = ({
         return true;
       });
 
-    // Fit the circular bounding box in the viewport
-    const scaleX = containerWidth / VISUAL_SCENE_EXTENT;
-    const scaleY = containerHeight / VISUAL_SCENE_EXTENT;
-    const initialScaleBase = Math.min(scaleX, scaleY);
-    const initialZoomMultiplier = mobile ? INITIAL_ZOOM_MULTIPLIER_MOBILE : INITIAL_ZOOM_MULTIPLIER_DESKTOP;
-    const initialScale = initialScaleBase * initialZoomMultiplier;
-
     const initialTransform = d3.zoomIdentity
       .translate(containerWidth / 2, containerHeight / 2)
-      .scale(initialScale)
+      .scale(ZOOM_MIN)
       .translate(-CIRCLE_CX, -CIRCLE_CY);
 
     const appliedTransform =
