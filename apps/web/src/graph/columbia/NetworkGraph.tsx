@@ -490,6 +490,11 @@ function isMobileViewport() {
   return window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT_PX}px)`).matches;
 }
 
+function supportsHoverInfo() {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return !isMobileViewport();
+  return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+}
+
 function isDesktopSafariBrowser() {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent || '';
@@ -1791,26 +1796,33 @@ const NetworkGraph = ({
         el.style.top = `${top}px`;
       };
 
-      node
-        .on('mouseover', (event, d) => {
-          const el = hoverStatusRef.current;
-          if (!el) return;
-          renderNodeHoverPanel(el, d);
-          el.style.display = 'block';
-          placeHoverNearPointer(event);
-        })
-        .on('mousemove', (event) => {
-          const el = hoverStatusRef.current;
-          if (!el || el.style.display === 'none') return;
-          placeHoverNearPointer(event);
-        })
-        .on('mouseout', (event) => {
-          const el = hoverStatusRef.current;
-          if (!el) return;
-          const next = event.relatedTarget;
-          if (next instanceof Node && el.contains(next)) return;
-          el.style.display = 'none';
-        });
+      const hoverInfoEnabled = supportsHoverInfo();
+      if (hoverInfoEnabled) {
+        node
+          .on('mouseover', (event, d) => {
+            const el = hoverStatusRef.current;
+            if (!el) return;
+            renderNodeHoverPanel(el, d);
+            el.style.display = 'block';
+            placeHoverNearPointer(event);
+          })
+          .on('mousemove', (event) => {
+            const el = hoverStatusRef.current;
+            if (!el || el.style.display === 'none') return;
+            placeHoverNearPointer(event);
+          })
+          .on('mouseout', (event) => {
+            const el = hoverStatusRef.current;
+            if (!el) return;
+            const next = event.relatedTarget;
+            if (next instanceof Node && el.contains(next)) return;
+            el.style.display = 'none';
+          });
+      } else {
+        node.on('mouseover', null).on('mousemove', null).on('mouseout', null);
+        const el = hoverStatusRef.current;
+        if (el) el.style.display = 'none';
+      }
 
       // ── Long-press a node to crawl from it (hold-to-crawl) ───────────────
       // Disabled while interactivePhysics is on (avoid expand while arranging).
@@ -2264,25 +2276,6 @@ const NetworkGraph = ({
                 window.open(url, '_blank', 'noopener,noreferrer');
               }
             })
-            .on('mouseover', (event, d) => {
-              const el = hoverStatusRef.current;
-              if (!el) return;
-              renderNodeHoverPanel(el, d);
-              el.style.display = 'block';
-              placeHoverNearPointer(event);
-            })
-            .on('mousemove', (event) => {
-              const el = hoverStatusRef.current;
-              if (!el || el.style.display === 'none') return;
-              placeHoverNearPointer(event);
-            })
-            .on('mouseout', (event) => {
-              const el = hoverStatusRef.current;
-              if (!el) return;
-              const next = event.relatedTarget;
-              if (next instanceof Node && el.contains(next)) return;
-              el.style.display = 'none';
-            })
             .on('pointerdown', function onIncrementalPtr(event, dn) {
               if (event.pointerType === 'mouse' && event.button !== 0) return;
               cancelLongPress();
@@ -2340,6 +2333,29 @@ const NetworkGraph = ({
                 }
               }, LONG_PRESS_MS);
             });
+
+          if (hoverInfoEnabled) {
+            ndEnter
+              .on('mouseover', (event, d) => {
+                const el = hoverStatusRef.current;
+                if (!el) return;
+                renderNodeHoverPanel(el, d);
+                el.style.display = 'block';
+                placeHoverNearPointer(event);
+              })
+              .on('mousemove', (event) => {
+                const el = hoverStatusRef.current;
+                if (!el || el.style.display === 'none') return;
+                placeHoverNearPointer(event);
+              })
+              .on('mouseout', (event) => {
+                const el = hoverStatusRef.current;
+                if (!el) return;
+                const next = event.relatedTarget;
+                if (next instanceof Node && el.contains(next)) return;
+                el.style.display = 'none';
+              });
+          }
 
           node = ndEnter.merge(nd);
 
