@@ -548,7 +548,7 @@ function renderNodeVisual(nodeGroup, d, nodePathInfo, options) {
 // Values below default to the existing behavior; tweak separately as needed.
 const ZOOM_MIN_DESKTOP = 0.03;
 const ZOOM_MAX_DESKTOP = 1.8;
-const ZOOM_MIN_MOBILE = 0.01;
+const ZOOM_MIN_MOBILE = 0.1;
 const ZOOM_MAX_MOBILE = 1.2;
 
 // Multiplier applied to the computed "fit-to-viewport" initial zoom scale.
