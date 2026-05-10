@@ -1322,6 +1322,8 @@ const NetworkGraph = ({
           .on('drag', dragged)
           .on('end', dragended));
 
+      const clusterModeEnabled = authenticatedSession;
+
       // ── Cluster layer (zoom-out cloud blobs) ─────────────────────────────
       // One <g class="cluster"> per qualifying group. They start parked, then
       // get attached into activeClusterLayer in cluster mode.
@@ -1355,6 +1357,7 @@ const NetworkGraph = ({
       // Build one cluster <g> per qualifying group (hidden by default).
       const clusterGroupRecords = [];
       for (let gi = 0; gi < groupCount; gi++) {
+        if (!clusterModeEnabled) continue;
         if (groupSizes[gi] < CLUSTER_GROUP_MIN_NODES) continue;
         const cg = clusterLayer.append('g')
           .attr('class', 'cluster')
@@ -1631,6 +1634,7 @@ const NetworkGraph = ({
       };
 
       const isClusterWanted = () => {
+        if (!clusterModeEnabled) return false;
         const clusterThreshold = getZoomClusterThreshold();
         if (inClusterMode) {
           return currentTransform.k < (clusterThreshold + CLUSTER_EXIT_HYSTERESIS);
@@ -1737,11 +1741,14 @@ const NetworkGraph = ({
 
       let suppressNextClick = false;
 
+      const singleClickFocusEnabled = () => !authenticatedSession && interactivePhysicsRef.current;
+
       node.on('click', (event, d) => {
         if (suppressNextClick) {
           suppressNextClick = false;
           return;
         }
+        if (!singleClickFocusEnabled()) return;
         if (nodeClickTimer) clearTimeout(nodeClickTimer);
         nodeClickTimer = setTimeout(() => {
           nodeClickTimer = null;
@@ -2090,7 +2097,11 @@ const NetworkGraph = ({
 
           const prevMaxPop = maxGroupPopulation(live.nodes, live.links);
           const nextMaxPop = maxGroupPopulation(nextDataset.nodes, nextLinksList);
-          if (prevMaxPop < CLUSTER_GROUP_MIN_NODES && nextMaxPop >= CLUSTER_GROUP_MIN_NODES) {
+          if (
+            clusterModeEnabled
+            && prevMaxPop < CLUSTER_GROUP_MIN_NODES
+            && nextMaxPop >= CLUSTER_GROUP_MIN_NODES
+          ) {
             return false;
           }
 
@@ -2253,6 +2264,7 @@ const NetworkGraph = ({
                 suppressNextClick = false;
                 return;
               }
+              if (!singleClickFocusEnabled()) return;
               if (nodeClickTimer) clearTimeout(nodeClickTimer);
               nodeClickTimer = setTimeout(() => {
                 nodeClickTimer = null;
@@ -2498,6 +2510,7 @@ const NetworkGraph = ({
   }, [colorBy, colorMaps, getNodeColor, createNodePath, data]);
 
   const desktopSafariClass = isDesktopSafariBrowser() ? ' desktop-safari' : '';
+  const showControlsAndLegend = authenticatedSession;
 
   return (
     <div className={`network-container${desktopSafariClass}`}>
@@ -2513,16 +2526,18 @@ const NetworkGraph = ({
           style={{ display: 'none' }}
         />
 
-        <div ref={controlsRef} className="controls-legend-container">
-          <ControlPanel
-            colorBy={colorBy}
-            setColorBy={setColorBy}
-            nodes={data.nodes}
-            darkSurface={darkSurface}
-            hideDegreeOption={!authenticatedSession}
-          />
-          <Legend colorBy={colorBy} colorMaps={colorMaps} darkSurface={darkSurface} />
-        </div>
+        {showControlsAndLegend ? (
+          <div ref={controlsRef} className="controls-legend-container">
+            <ControlPanel
+              colorBy={colorBy}
+              setColorBy={setColorBy}
+              nodes={data.nodes}
+              darkSurface={darkSurface}
+              hideDegreeOption={false}
+            />
+            <Legend colorBy={colorBy} colorMaps={colorMaps} darkSurface={darkSurface} />
+          </div>
+        ) : null}
       </div>
     </div>
   );
