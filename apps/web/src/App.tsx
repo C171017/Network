@@ -108,7 +108,7 @@ export default function App() {
   const [graphLoading, setGraphLoading] = useState(true)
   const [graph, setGraph] = useState<GraphData | null>(null)
   /** Matches graph chrome (dark inner disk vs light outer); default dark for page background before graph reports. */
-  const [uiSurfaceDark, setUiSurfaceDark] = useState(true)
+  const [, setUiSurfaceDark] = useState(true)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const accountMenuRef = useRef<HTMLDivElement>(null)
   /** Graph “drag physics” — toggled by long-pressing the logo (same duration as node long-press). */
@@ -422,7 +422,7 @@ export default function App() {
           <span className="app-logo-frame">
             <img
               className={`app-logo${interactivePhysics ? ' app-logo-shake' : ''}`}
-              src={uiSurfaceDark ? '/logo-blackback.png' : '/logo-whiteback.png'}
+              src="/logo-blackback.png"
               alt=""
             />
           </span>
