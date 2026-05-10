@@ -200,15 +200,8 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
   const controlsRef = useRef(null);
   const zoomRef = useRef(null);
   const zoomCleanupRef = useRef(null);
-  // Refs that mirror colorBy / colorMaps so cluster tooltip handlers (bound
-  // inside the data-keyed main effect) always read the latest values.
-  const colorByRef = useRef(colorBy);
-  const colorMapsRef = useRef({});
   const [colorMaps, setColorMaps] = useState({});
   const [darkSurface, setDarkSurface] = useState(false);
-
-  useEffect(() => { colorByRef.current = colorBy; }, [colorBy]);
-  useEffect(() => { colorMapsRef.current = colorMaps; }, [colorMaps]);
 
 ///////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////
@@ -1248,87 +1241,9 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
         }
       });
 
-      // Create tooltip
-      d3.select('body').selectAll('.tooltip').remove();
-      const tooltip = d3.select('body').append('div')
-        .attr('class', 'tooltip')
-        .style('opacity', 0)
-        .style('pointer-events', 'none');
-
-      // ── Cluster interactivity (hover tooltip + click-to-zoom) ────────────
-      // Tooltip shows the colorBy-value breakdown for that group; click
-      // animates the zoom past ZOOM_CLUSTER_THRESHOLD so the cluster
-      // expands back into individual nodes. Uses colorByRef / colorMapsRef
-      // so it stays correct after the user changes the colorBy selection
-      // (the main effect only re-runs on `data` changes, not colorBy).
-      const computeGroupValueCounts = (gi, key) => {
-        const counts = new Map();
-        for (const n of data.nodes) {
-          if (n.__groupIndex !== gi) continue;
-          const field = n[key];
-          const val = field == null || field === ''
-            ? '(unknown)'
-            : String(field).split(',')[0].trim();
-          counts.set(val, (counts.get(val) || 0) + 1);
-        }
-        return counts;
-      };
-
-      clusterGroupRecords.forEach(({ gi, sel, size }) => {
+      // ── Cluster interactivity (click-to-zoom) ───────────────────────────
+      clusterGroupRecords.forEach(({ gi, sel }) => {
         const clusterSel = sel.style('pointer-events', 'auto');
-        if (!isMobile) {
-          clusterSel
-            .on('mouseover', (event) => {
-              const liveColorBy = colorByRef.current;
-              const liveColorMaps = colorMapsRef.current || {};
-              const valCounts = computeGroupValueCounts(gi, liveColorBy);
-              const colorMap = liveColorMaps[liveColorBy] || {};
-              const top = [...valCounts.entries()]
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, 6);
-
-              let html = `<h4 style="margin:0 0 4px 0;">Group #${gi} \u00b7 ${size} nodes</h4>`;
-              html += `<div style="font-size:0.8em;opacity:0.7;margin-bottom:6px;">By: ${liveColorBy}</div>`;
-              html += '<div style="display:flex;flex-direction:column;gap:3px;">';
-              top.forEach(([val, count]) => {
-                const color = colorMap[val] || '#9e9e9e';
-                const pct = ((count / size) * 100).toFixed(0);
-                html += `<div style="display:flex;align-items:center;gap:6px;font-size:0.85em;">`
-                  + `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};flex:none;"></span>`
-                  + `<span>${val}: ${count} (${pct}%)</span>`
-                  + `</div>`;
-              });
-              if (valCounts.size > top.length) {
-                html += `<div style="opacity:0.6;font-size:0.8em;margin-top:2px;">+${valCounts.size - top.length} more\u2026</div>`;
-              }
-              html += '</div>';
-              html += '<div style="opacity:0.6;font-size:0.75em;margin-top:6px;">Click to zoom in</div>';
-
-              tooltip
-                .html(html)
-                .style('left', (event.pageX + 12) + 'px')
-                .style('top', (event.pageY + 12) + 'px')
-                .classed('visible', true)
-                .transition()
-                .duration(200)
-                .style('opacity', 0.95)
-                .style('transform', 'translateY(0)');
-            })
-            .on('mousemove', (event) => {
-              tooltip
-                .style('left', (event.pageX + 12) + 'px')
-                .style('top', (event.pageY + 12) + 'px');
-            })
-            .on('mouseout', () => {
-              tooltip.transition()
-                .duration(200)
-                .style('opacity', 0)
-                .style('transform', 'translateY(10px)')
-                .on('end', function () {
-                  tooltip.classed('visible', false);
-                });
-            });
-        }
         clusterSel.on('click', () => {
           const c = computeGroupCentroid(gi);
           const targetK = getZoomClusterThreshold() * 2.5;
@@ -1339,46 +1254,13 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
           svg.transition()
             .duration(500)
             .call(zoom.transform, target);
-          tooltip.transition().duration(150).style('opacity', 0)
-            .on('end', function () { tooltip.classed('visible', false); });
         });
       });
 
-      // Add node shapes and tooltips
+      // Add node shapes
       node.each(function (d) {
         const nodeGroup = d3.select(this);
         const nodePathInfo = createNodePath(d);
-
-        if (!isMobile) {
-          nodeGroup
-            .on('mouseover', (event) => {
-              const major = [d.cu_major, d.cu_major_1, d.major]
-                .map((value) => (value == null ? '' : String(value).trim()))
-                .find((value) => value !== '') || 'N/A';
-              let html = `<h4>ID: ${d.id}</h4>`;
-              html += `<p><strong>Major:</strong> ${major}</p>`;
-              html += `<p style="opacity:0.75;font-size:0.85em;margin-top:6px;">Double-click to open GitHub profile</p>`;
-
-              tooltip
-                .html(html)
-                .style('left', (event.pageX + 10) + 'px')
-                .style('top', (event.pageY - 28) + 'px')
-                .classed('visible', true)
-                .transition()
-                .duration(200)
-                .style('opacity', 0.9)
-                .style('transform', 'translateY(0)');
-            })
-            .on('mouseout', () => {
-              tooltip.transition()
-                .duration(300)
-                .style('opacity', 0)
-                .style('transform', 'translateY(10px)')
-                .on('end', function () {
-                  tooltip.classed('visible', false);
-                });
-            });
-        }
 
         renderNodeVisual(nodeGroup, d, nodePathInfo, {
           colorMaps,

@@ -73,38 +73,6 @@ path {
   stroke-opacity: .8;
 }
 
-.tooltip {
-  position: absolute;
-  padding: var(--spacing-md);
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  opacity: 0;
-  transition: opacity .3s;
-  font-size: .9rem;
-  max-width: 250px;
-  z-index: 100;
-  transform: translateY(10px);
-  color: var(--text-color);
-}
-
-.tooltip.visible {
-  opacity: .96;
-  transform: translateY(0);
-}
-
-.tooltip h4 {
-  margin-bottom: var(--spacing-sm);
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--primary-color);
-  border-bottom: 1px solid var(--border-color);
-}
-
-.tooltip p {
-  margin: 3px 0;
-}
-
 .legend-container {
   position: absolute;
   bottom: 20px;
@@ -121,8 +89,6 @@ path {
 @media (max-width: 768px) {
   .network-container { height: 100dvh; }
   .control-panel select { min-width: 120px; }
-  .tooltip { max-width: 200px; font-size: 12px; }
-  .tooltip h4 { font-size: 14px; }
   .node text { font-size: 12px; }
   .legend-container {
     left: 10px;
