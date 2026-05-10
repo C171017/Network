@@ -468,7 +468,7 @@ const ZOOM_MAX_MOBILE = 1;
 
 // Multiplier applied to the computed "fit-to-viewport" initial zoom scale.
 // (1 keeps current behavior; increase >1 to zoom in more initially on mobile/desktop.)
-const INITIAL_ZOOM_MULTIPLIER_DESKTOP = 1.6;
+const INITIAL_ZOOM_MULTIPLIER_DESKTOP = 1.1;
 const INITIAL_ZOOM_MULTIPLIER_MOBILE = 1.0;
 const PAN_MARGIN_X = 30000;
 const PAN_MARGIN_Y = 1200;
@@ -589,12 +589,13 @@ const CANVAS_WHITE_OUTER_RADIUS = Math.max(0, CIRCLE_RADIUS - CANVAS_EDGE_FEATHE
 // Decorative background image (rendered inside the zoom group so it pans/zooms
 // with the graph). Tune these three numbers to align the artwork with the disk.
 const BACKGROUND_IMAGE_URL = '/background.png';
-/** Image width in world units. Larger = bigger image. ~3× the canvas diameter
+/** Image width in world units. Larger = bigger image. ~4.68× the canvas diameter
  *  by default so the artwork extends comfortably past the visible viewport. */
-const BACKGROUND_IMAGE_SIZE = CIRCLE_DIAMETER * 3.0;
-/** Center offsets in world units; (0, 0) centers the image on the canvas. */
+const BACKGROUND_IMAGE_SIZE = CIRCLE_DIAMETER * 4.5;
+/** Center offsets in world units; (0, 0) centers the image on the canvas.
+ *  Negative Y nudges the artwork upward (SVG Y axis points down). */
 const BACKGROUND_IMAGE_OFFSET_X = 0;
-const BACKGROUND_IMAGE_OFFSET_Y = 0;
+const BACKGROUND_IMAGE_OFFSET_Y = -CIRCLE_DIAMETER * 0.063;
 
 /** Widen the logo’s dark zone vs panel math so blackback kicks in at the edge of the ramp, not only when fully black. */
 const LOGO_DARK_DISK_RADIUS_FACTOR = 1.06;
