@@ -3,6 +3,9 @@ import type { User } from '@supabase/supabase-js'
 import NetworkGraph from './components/NetworkGraph'
 import { graphDtoToForceData, type GraphData } from './graph/graphDto'
 import {
+  DEFAULT_EXPAND_MAX_FOLLOWERS,
+  DEFAULT_EXPAND_MAX_FOLLOWING,
+  DEFAULT_EXPAND_MAX_HOP_DEPTH,
   DEFAULT_EXPAND_STREAM_THROTTLE_MS,
   expandGraphStream,
   fetchOwnedGraph,
@@ -346,6 +349,9 @@ export default function App() {
           supabaseAccessToken: session.supabaseAccessToken,
           githubAccessToken: session.githubAccessToken,
           rootLogin: target,
+          maxFollowing: DEFAULT_EXPAND_MAX_FOLLOWING,
+          maxFollowers: DEFAULT_EXPAND_MAX_FOLLOWERS,
+          maxHopDepth: DEFAULT_EXPAND_MAX_HOP_DEPTH,
           throttleMs: DEFAULT_EXPAND_STREAM_THROTTLE_MS,
           onGraph: (dto) => {
             const incoming = graphDtoToForceData(dto)

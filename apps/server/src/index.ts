@@ -10,6 +10,7 @@ import { createClient } from "@supabase/supabase-js";
 import {
   DEFAULT_AUGMENTS_MAX_PAGES,
   DEFAULT_FOLLOWING_BRANCH,
+  DEFAULT_MAX_HOP_DEPTH,
   DEFAULT_PROFILE_AUGMENTS_MODE,
   expandFollowingDepthGraph,
   type GithubProfileAugmentsMode,
@@ -42,6 +43,7 @@ type ParsedExpandBody = {
   rootLogin: string;
   branchFollowing: number;
   branchFollowers: number;
+  maxHopDepth: number;
   profileAugments: GithubProfileAugmentsMode;
   augmentsMaxPages: number;
   maxProfileEnrichmentsPerSide?: number;
@@ -55,6 +57,7 @@ function parseExpandJsonBody(raw: unknown): ParsedExpandBody | { error: string }
     rootLogin?: string;
     maxFollowing?: number;
     maxFollowers?: number;
+    maxHopDepth?: number;
     profileAugments?: unknown;
     augmentsMaxPages?: unknown;
     maxProfileEnrichmentsPerSide?: unknown;
@@ -69,6 +72,15 @@ function parseExpandJsonBody(raw: unknown): ParsedExpandBody | { error: string }
     Math.max(body.maxFollowers ?? body.maxFollowing ?? DEFAULT_FOLLOWING_BRANCH, 1),
     20,
   );
+
+  let maxHopDepth = DEFAULT_MAX_HOP_DEPTH;
+  if (body.maxHopDepth !== undefined && body.maxHopDepth !== null) {
+    const d = body.maxHopDepth;
+    if (typeof d !== "number" || !Number.isInteger(d) || d < 1 || d > 30) {
+      return { error: "maxHopDepth must be an integer between 1 and 30." };
+    }
+    maxHopDepth = d;
+  }
 
   let profileAugments: GithubProfileAugmentsMode = DEFAULT_PROFILE_AUGMENTS_MODE;
   if (body.profileAugments !== undefined && body.profileAugments !== null) {
@@ -104,6 +116,7 @@ function parseExpandJsonBody(raw: unknown): ParsedExpandBody | { error: string }
     rootLogin,
     branchFollowing,
     branchFollowers,
+    maxHopDepth,
     profileAugments,
     augmentsMaxPages,
     ...(maxProfileEnrichmentsPerSide !== undefined ? { maxProfileEnrichmentsPerSide } : {}),
@@ -268,6 +281,7 @@ app.post("/api/graph/expand", async (c) => {
       rootLogin: parsed.rootLogin,
       branchFollowing: parsed.branchFollowing,
       branchFollowers: parsed.branchFollowers,
+      maxHopDepth: parsed.maxHopDepth,
       profileAugments: parsed.profileAugments,
       augmentsMaxPages: parsed.augmentsMaxPages,
       ...(parsed.maxProfileEnrichmentsPerSide !== undefined
@@ -311,6 +325,7 @@ app.post("/api/graph/expand-stream", async (c) => {
           rootLogin: parsed.rootLogin,
           branchFollowing: parsed.branchFollowing,
           branchFollowers: parsed.branchFollowers,
+          maxHopDepth: parsed.maxHopDepth,
           profileAugments: parsed.profileAugments,
           augmentsMaxPages: parsed.augmentsMaxPages,
           ...(parsed.maxProfileEnrichmentsPerSide !== undefined

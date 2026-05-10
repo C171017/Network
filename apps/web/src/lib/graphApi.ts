@@ -51,8 +51,11 @@ export async function expandGraph(params: {
   rootLogin: string
   maxFollowing?: number
   maxFollowers?: number
+  maxHopDepth?: number
 }): Promise<GraphDTO> {
-  const maxFollowing = params.maxFollowing ?? 2
+  const maxFollowing = params.maxFollowing ?? DEFAULT_EXPAND_MAX_FOLLOWING
+  const maxFollowers = params.maxFollowers ?? DEFAULT_EXPAND_MAX_FOLLOWERS
+  const maxHopDepth = params.maxHopDepth ?? DEFAULT_EXPAND_MAX_HOP_DEPTH
   const res = await fetch(apiUrl('/api/graph/expand'), {
     method: 'POST',
     headers: {
@@ -63,7 +66,8 @@ export async function expandGraph(params: {
     body: JSON.stringify({
       rootLogin: params.rootLogin,
       maxFollowing,
-      ...(params.maxFollowers != null ? { maxFollowers: params.maxFollowers } : {}),
+      maxFollowers,
+      maxHopDepth,
     }),
   })
 
@@ -142,12 +146,21 @@ function accumulatorToDTO(acc: {
 /** Default throttle between incremental graph paints (Columbia rebuilds physics on each `data` update). */
 export const DEFAULT_EXPAND_STREAM_THROTTLE_MS = 250
 
+/** Neighbor cap per side (matches server `DEFAULT_FOLLOWING_BRANCH`). */
+export const DEFAULT_EXPAND_MAX_FOLLOWING = 2
+export const DEFAULT_EXPAND_MAX_FOLLOWERS = 2
+/**
+ * Matches server `DEFAULT_MAX_HOP_DEPTH`: root at `degree` 1, expand through three hops (deepest nodes at `degree` 4).
+ */
+export const DEFAULT_EXPAND_MAX_HOP_DEPTH = 4
+
 export type ExpandGraphStreamParams = {
   supabaseAccessToken: string
   githubAccessToken: string
   rootLogin: string
   maxFollowing?: number
   maxFollowers?: number
+  maxHopDepth?: number
 }
 
 export async function expandGraphStream(params: ExpandGraphStreamParams & {
@@ -155,8 +168,9 @@ export async function expandGraphStream(params: ExpandGraphStreamParams & {
   throttleMs?: number
   signal?: AbortSignal
 }): Promise<GraphDTO> {
-  const maxFollowing = params.maxFollowing ?? 2
-  const maxFollowers = params.maxFollowers ?? maxFollowing
+  const maxFollowing = params.maxFollowing ?? DEFAULT_EXPAND_MAX_FOLLOWING
+  const maxFollowers = params.maxFollowers ?? DEFAULT_EXPAND_MAX_FOLLOWERS
+  const maxHopDepth = params.maxHopDepth ?? DEFAULT_EXPAND_MAX_HOP_DEPTH
   const throttleMs = params.throttleMs ?? DEFAULT_EXPAND_STREAM_THROTTLE_MS
   const rootLoginTrimmed = params.rootLogin.trim()
 
@@ -196,7 +210,8 @@ export async function expandGraphStream(params: ExpandGraphStreamParams & {
     body: JSON.stringify({
       rootLogin: params.rootLogin,
       maxFollowing,
-      ...(params.maxFollowers != null ? { maxFollowers: params.maxFollowers } : {}),
+      maxFollowers,
+      maxHopDepth,
     }),
     signal: params.signal,
   })

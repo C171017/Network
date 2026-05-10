@@ -64,8 +64,11 @@ export const DEFAULT_PROFILE_ENRICH_PER_SIDE = 12;
 export const DEFAULT_AUGMENTS_MAX_PAGES = 2;
 /** Default: org/social list endpoints only for the seed user (fewer API calls). */
 export const DEFAULT_PROFILE_AUGMENTS_MODE: GithubProfileAugmentsMode = "root";
-/** Expand nodes at hop-degrees 1 … maxHopDepth - 1; deepest discovered users sit at `maxHopDepth`. */
-export const DEFAULT_MAX_HOP_DEPTH = 12;
+/**
+ * Expand nodes at hop-degrees 1 … maxHopDepth - 1; deepest discovered users sit at `maxHopDepth`.
+ * Default **4**: root stays at degree 1, then up to three hops outward (degrees 2–4).
+ */
+export const DEFAULT_MAX_HOP_DEPTH = 4;
 
 async function ghFetch<T>(token: string, path: string): Promise<T> {
   const res = await fetch(`${API}${path}`, {
