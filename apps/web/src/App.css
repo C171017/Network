@@ -86,13 +86,28 @@ textarea {
   }
 }
 
+@keyframes app-logo-boost-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .app-logo-hit .app-logo.app-logo-shake {
   animation: app-logo-shake 0.28s ease-in-out infinite;
   transform-origin: center center;
 }
 
+.app-logo-hit .app-logo.app-logo-boost-spin {
+  animation: app-logo-boost-spin var(--app-logo-spin-ms, 900ms) linear infinite;
+  transform-origin: center center;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .app-logo-hit .app-logo.app-logo-shake {
+  .app-logo-hit .app-logo.app-logo-shake,
+  .app-logo-hit .app-logo.app-logo-boost-spin {
     animation: none;
   }
 }

@@ -547,14 +547,14 @@ function renderNodeVisual(nodeGroup, d, nodePathInfo, options) {
 // Define zoom settings (split mobile vs desktop).
 // Values below default to the existing behavior; tweak separately as needed.
 const ZOOM_MIN_DESKTOP = 0.03;
-const ZOOM_MAX_DESKTOP = 0.8;
+const ZOOM_MAX_DESKTOP = 1.8;
 const ZOOM_MIN_MOBILE = 0.01;
-const ZOOM_MAX_MOBILE = 1;
+const ZOOM_MAX_MOBILE = 1.2;
 
 // Multiplier applied to the computed "fit-to-viewport" initial zoom scale.
 // (1 keeps current behavior; increase >1 to zoom in more initially on mobile/desktop.)
 const INITIAL_ZOOM_MULTIPLIER_DESKTOP = 1.8;
-const INITIAL_ZOOM_MULTIPLIER_MOBILE = 1.0;
+const INITIAL_ZOOM_MULTIPLIER_MOBILE = 1.2;
 
 // Cluster mode: when zoomed below the viewport-specific threshold, large groups collapse
 // into a single organic "cloud" shape and smaller groups disappear entirely.
@@ -565,9 +565,8 @@ const ZOOM_CLUSTER_THRESHOLD_MOBILE = 0.08;
 const CLUSTER_GROUP_MIN_NODES = 8;
 const CLUSTER_EXIT_HYSTERESIS = 0.02;
 const CLUSTER_EXCLUDED_COLORS = new Set(['#9e9e9e', '#999999', '#808080', 'gray', 'grey']);
-// Viewport-cull distant groups (DOM + freeze offscreen physics) for performance.
-// Cluster mode still handles far-zoom reduction; groups reattach as they pan into view.
-const ENABLE_VIEWPORT_GROUP_CULLING = true;
+// Viewport group culling is enabled per-build for mobile only (see `enableViewportGroupCulling` in graph init).
+// Desktop keeps all groups attached for simpler physics/highlight behavior; cluster mode still helps when zoomed out.
 
 /** Skip full-screen link glow rasterization beyond this node count (desktop chrome only). */
 const LINK_GLOW_MAX_NODES = 420;
@@ -821,12 +820,16 @@ const NetworkGraph = ({
     const ZOOM_MIN = mobile ? ZOOM_MIN_MOBILE : ZOOM_MIN_DESKTOP;
     const ZOOM_MAX = mobile ? ZOOM_MAX_MOBILE : ZOOM_MAX_DESKTOP;
 
+    // onTransformChange(transform, phase): `active` during gesture; `end` when d3-zoom ends (wheel stop, pinch end, transition end).
     const zoom = d3.zoom()
       .scaleExtent([ZOOM_MIN, ZOOM_MAX])
       .translateExtent(BACKGROUND_PAN_EXTENT_WORLD)
       .on('zoom', (event) => {
         g.attr('transform', event.transform);
-        onTransformChange?.(event.transform);
+        onTransformChange?.(event.transform, 'active');
+      })
+      .on('end', (event) => {
+        onTransformChange?.(event.transform, 'end');
       })
       .filter((event) => {
         if (event.type === 'dblclick') return false;
@@ -1013,6 +1016,8 @@ const NetworkGraph = ({
     if (!svgRef.current || !dataset?.nodes?.length) return undefined;
     const nodeCountHeavy = dataset.nodes.length;
     const isMobile = isMobileViewport();
+    /** Mobile-only: park off-screen groups for cheaper pan/zoom compositing (desktop keeps all groups live). */
+    const enableViewportGroupCulling = isMobile;
     const isDesktopSafari = isDesktopSafariBrowser();
     const enableHeavySvgEffects = !isMobile && !isDesktopSafari;
     const enableLinkGlow =
@@ -1033,6 +1038,7 @@ const NetworkGraph = ({
     /** Runs after helpers like `applyGroupCulling` are defined — post-layout HUD refresh once sim ends. */
     let runAfterSimulationLayoutEnd = () => {};
     let hoverPlacementRaf = null;
+    let uiSurfaceThemeZoomRaf = null;
     try {
       const containerWidth = svgRef.current.parentElement.clientWidth || 800;
       const containerHeight = window.innerHeight * 0.7 || 600;
@@ -1087,7 +1093,7 @@ const NetworkGraph = ({
       const transitionStartR = Math.max(0, CANVAS_WHITE_OUTER_RADIUS - H * 0.22);
       const fadeStartU = 0.94; // start fading to transparent only near the very edge
       const fadePow = 0.85; // lower = gentler fade curve
-      const stopCount = 40; // denser stops => fewer chances of visible banding
+      const stopCount = isMobile ? 20 : 40; // fewer stops on mobile for cheaper gradient rasterization
 
       const colorInterp = d3.interpolateRgbBasis([
         '#fafbfc',
@@ -1459,7 +1465,8 @@ const NetworkGraph = ({
           .on('drag', dragged)
           .on('end', dragended));
 
-      const clusterModeEnabled = authenticatedSession;
+      // Guest desktop: full graph at all zoom levels. Mobile guests: same cluster-at-low-zoom path as auth (better FPS).
+      const clusterModeEnabled = authenticatedSession || isMobile;
 
       // ── Cluster layer (zoom-out cloud blobs) ─────────────────────────────
       // One <g class="cluster"> per qualifying group. They start parked, then
@@ -1800,7 +1807,7 @@ const NetworkGraph = ({
 
         // ── Normal mode: viewport cull ──
         const nextVisibleGroups = new Set();
-        if (ENABLE_VIEWPORT_GROUP_CULLING) {
+        if (enableViewportGroupCulling) {
           const margin = NODE_RADIUS + 20;
           const minX = (-t.x) / t.k - margin;
           const maxX = (width - t.x) / t.k + margin;
@@ -1866,15 +1873,34 @@ const NetworkGraph = ({
         updateUiSurfaceTheme();
       };
 
+      const cancelScheduledUiSurfaceThemeFromZoom = () => {
+        if (uiSurfaceThemeZoomRaf != null) {
+          window.cancelAnimationFrame(uiSurfaceThemeZoomRaf);
+          uiSurfaceThemeZoomRaf = null;
+        }
+      };
+      const scheduleUiSurfaceThemeFromZoom = () => {
+        if (uiSurfaceThemeZoomRaf != null) return;
+        uiSurfaceThemeZoomRaf = window.requestAnimationFrame(() => {
+          uiSurfaceThemeZoomRaf = null;
+          updateUiSurfaceTheme();
+        });
+      };
+
       const { zoom, cleanup: cleanupZoom } = setupZoom(
         svg,
         g,
         width,
         height,
-        (transform) => {
+        (transform, zoomPhase) => {
           currentTransform = transform;
           applyGroupCulling();
-          updateUiSurfaceTheme();
+          if (zoomPhase === 'end') {
+            cancelScheduledUiSurfaceThemeFromZoom();
+            updateUiSurfaceTheme();
+          } else {
+            scheduleUiSurfaceThemeFromZoom();
+          }
         },
         persistedZoomForBuild,
       );
@@ -2555,6 +2581,10 @@ const NetworkGraph = ({
     }
 
     return () => {
+      if (uiSurfaceThemeZoomRaf != null) {
+        window.cancelAnimationFrame(uiSurfaceThemeZoomRaf);
+        uiSurfaceThemeZoomRaf = null;
+      }
       if (hoverPlacementRaf != null) {
         window.cancelAnimationFrame(hoverPlacementRaf);
         hoverPlacementRaf = null;

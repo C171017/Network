@@ -229,7 +229,13 @@
 
 .node circle {
   cursor: pointer;
-  transition: stroke .14s ease, stroke-width .14s ease, opacity .14s ease;
+}
+
+/* Hover-driven stroke polish only on fine pointers; skips transition work on coarse/touch-first UIs during pan/zoom. */
+@media (hover: hover) and (pointer: fine) {
+  .node circle {
+    transition: stroke .14s ease, stroke-width .14s ease, opacity .14s ease;
+  }
 }
 
 .node circle:not(.node-hub):not(.long-press-ring):not(.node-outline),
@@ -304,7 +310,12 @@
 .link-full {
   fill-opacity: .48;
   pointer-events: none;
-  transition: opacity .2s, fill-opacity .2s ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .link-full {
+    transition: opacity .2s, fill-opacity .2s ease;
+  }
 }
 
 .link-full.highlight {

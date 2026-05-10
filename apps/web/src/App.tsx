@@ -126,8 +126,15 @@ export default function App() {
   /** Graph “drag physics” — toggled by long-pressing the logo (same duration as node long-press). */
   const [interactivePhysics, setInteractivePhysics] = useState(false)
   const logoLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const logoSpinRafRef = useRef<number | null>(null)
+  const logoSpinRampStartRef = useRef<number | null>(null)
+  const logoSpinActiveRef = useRef(false)
+  const logoLoginTriggeredRef = useRef(false)
+  const logoPointerStartPhysicsRef = useRef(false)
   const logoSuppressClickRef = useRef(false)
   const logoPointerStartRef = useRef<{ x: number; y: number } | null>(null)
+  const [logoBoostSpinActive, setLogoBoostSpinActive] = useState(false)
+  const [logoBoostSpinDurationMs, setLogoBoostSpinDurationMs] = useState(900)
 
   useEffect(() => {
     if (!supabase) return
@@ -207,6 +214,10 @@ export default function App() {
         window.clearTimeout(logoLongPressTimerRef.current)
         logoLongPressTimerRef.current = null
       }
+      if (logoSpinRafRef.current != null) {
+        window.cancelAnimationFrame(logoSpinRafRef.current)
+        logoSpinRafRef.current = null
+      }
     }
   }, [])
 
@@ -217,14 +228,66 @@ export default function App() {
     }
   }
 
+  function stopLogoSpinRamp() {
+    logoSpinActiveRef.current = false
+    logoSpinRampStartRef.current = null
+    if (logoSpinRafRef.current != null) {
+      window.cancelAnimationFrame(logoSpinRafRef.current)
+      logoSpinRafRef.current = null
+    }
+    setLogoBoostSpinActive(false)
+    setLogoBoostSpinDurationMs(900)
+  }
+
+  function startLogoSpinRamp() {
+    if (logoSpinActiveRef.current) return
+    logoSpinActiveRef.current = true
+    logoSpinRampStartRef.current = null
+    setLogoBoostSpinDurationMs(900)
+    setLogoBoostSpinActive(true)
+
+    const LOGIN_RAMP_MS = 1700
+    const MIN_SPIN_MS = 120
+    const MAX_SPIN_MS = 900
+
+    const tick = (now: number) => {
+      if (!logoSpinActiveRef.current) return
+      if (logoSpinRampStartRef.current == null) logoSpinRampStartRef.current = now
+      const elapsed = now - logoSpinRampStartRef.current
+      const t = Math.max(0, Math.min(1, elapsed / LOGIN_RAMP_MS))
+      const eased = t * t
+      const spinMs = MAX_SPIN_MS - (MAX_SPIN_MS - MIN_SPIN_MS) * eased
+      setLogoBoostSpinDurationMs(spinMs)
+      if (t >= 1 && !logoLoginTriggeredRef.current && !session) {
+        logoLoginTriggeredRef.current = true
+        logoSuppressClickRef.current = true
+        stopLogoSpinRamp()
+        void signIn()
+        return
+      }
+      logoSpinRafRef.current = window.requestAnimationFrame(tick)
+    }
+
+    logoSpinRafRef.current = window.requestAnimationFrame(tick)
+  }
+
   function onLogoPointerDown(e: React.PointerEvent<HTMLButtonElement>) {
     if (e.button !== 0) return
     logoPointerStartRef.current = { x: e.clientX, y: e.clientY }
+    logoPointerStartPhysicsRef.current = interactivePhysics
+    logoLoginTriggeredRef.current = false
     clearLogoLongPressTimer()
     logoLongPressTimerRef.current = window.setTimeout(() => {
       logoLongPressTimerRef.current = null
       logoSuppressClickRef.current = true
-      setInteractivePhysics((v) => !v)
+      if (logoPointerStartPhysicsRef.current) {
+        setInteractivePhysics(false)
+      } else {
+        setInteractivePhysics(true)
+      }
+      if (!session && !logoPointerStartPhysicsRef.current) {
+        startLogoSpinRamp()
+      }
       setAccountMenuOpen(false)
     }, LONG_PRESS_MS)
     e.currentTarget.setPointerCapture(e.pointerId)
@@ -237,11 +300,13 @@ export default function App() {
     const dy = e.clientY - start.y
     if (dx * dx + dy * dy > LONG_PRESS_MOVE_CANCEL_PX * LONG_PRESS_MOVE_CANCEL_PX) {
       clearLogoLongPressTimer()
+      stopLogoSpinRamp()
     }
   }
 
   function onLogoPointerEnd(e: React.PointerEvent<HTMLButtonElement>) {
     clearLogoLongPressTimer()
+    stopLogoSpinRamp()
     logoPointerStartRef.current = null
     try {
       e.currentTarget.releasePointerCapture(e.pointerId)
@@ -253,6 +318,10 @@ export default function App() {
   function onLogoClick(e: React.MouseEvent<HTMLButtonElement>) {
     if (logoSuppressClickRef.current) {
       logoSuppressClickRef.current = false
+      e.preventDefault()
+      return
+    }
+    if (!session) {
       e.preventDefault()
       return
     }
@@ -431,63 +500,45 @@ export default function App() {
           aria-label={
             interactivePhysics
               ? 'Account menu. Drag physics on; long press to turn off.'
-              : 'Account menu. Long press to turn on drag physics.'
+              : !session
+                ? 'Long press to enter drag physics, keep holding to sign in with GitHub.'
+                : 'Account menu. Long press to turn on drag physics.'
           }
         >
           <span className="app-logo-frame">
             <img
-              className={`app-logo${interactivePhysics ? ' app-logo-shake' : ''}`}
+              className={`app-logo${interactivePhysics ? ' app-logo-shake' : ''}${logoBoostSpinActive ? ' app-logo-boost-spin' : ''}`}
               src="/logo-blackback.png"
               alt=""
+              style={{ ['--app-logo-spin-ms' as string]: `${Math.round(logoBoostSpinDurationMs)}ms` }}
             />
           </span>
         </button>
-        {accountMenuOpen ? (
+        {session && accountMenuOpen ? (
           <div
             id="account-menu"
             className="auth-popover glass-chrome"
             role="dialog"
             aria-label={session ? 'Account' : 'Sign in'}
           >
-            {!session ? (
-              <>
-                <div className="auth-popover-title">Sign in</div>
-                <p className="auth-popover-hint">
-                  GitHub hosts the actual login page. Continue there to authorize this app.
-                </p>
-                <button
-                  type="button"
-                  className="chrome-btn primary"
-                  onClick={() => {
-                    setAccountMenuOpen(false)
-                    void signIn()
-                  }}
-                >
-                  Continue with GitHub
-                </button>
-              </>
-            ) : (
-              <>
-                <div className="auth-popover-title">Account</div>
-                <span className="chrome-pill">@{session.login}</span>
-                <button
-                  type="button"
-                  className="chrome-btn"
-                  onClick={() => {
-                    setAccountMenuOpen(false)
-                    void signOut()
-                  }}
-                >
-                  Sign out
-                </button>
-                <p className="auth-popover-hint auth-popover-hint-tight">
-                  No hosted sign-out URL—this only ends the session in this browser.
-                </p>
-                <p className="auth-popover-hint auth-popover-hint-tight">
-                  Expand by long-holding any node in the graph.
-                </p>
-              </>
-            )}
+            <div className="auth-popover-title">Account</div>
+            <span className="chrome-pill">@{session.login}</span>
+            <button
+              type="button"
+              className="chrome-btn"
+              onClick={() => {
+                setAccountMenuOpen(false)
+                void signOut()
+              }}
+            >
+              Sign out
+            </button>
+            <p className="auth-popover-hint auth-popover-hint-tight">
+              No hosted sign-out URL—this only ends the session in this browser.
+            </p>
+            <p className="auth-popover-hint auth-popover-hint-tight">
+              Expand by long-holding any node in the graph.
+            </p>
           </div>
         ) : null}
       </div>
