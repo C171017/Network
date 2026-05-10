@@ -195,11 +195,19 @@ const CANVAS_WHITE_OUTER_RADIUS = Math.max(0, CIRCLE_RADIUS - CANVAS_EDGE_FEATHE
 
 // 4. Component definition and state initialization
 
-const NetworkGraph = ({ colorBy, setColorBy, data }) => {
+const NetworkGraph = ({
+  colorBy,
+  setColorBy,
+  data,
+  interactivePhysics = false,
+  setInteractivePhysics
+}) => {
   const svgRef = useRef();
   const controlsRef = useRef(null);
   const zoomRef = useRef(null);
   const zoomCleanupRef = useRef(null);
+  const interactivePhysicsRef = useRef(interactivePhysics);
+  interactivePhysicsRef.current = interactivePhysics;
   const [colorMaps, setColorMaps] = useState({});
   const [darkSurface, setDarkSurface] = useState(false);
 
@@ -444,6 +452,9 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
     let handleGlobalDragRelease = null;
     let simulation = null;
     let nodeClickTimer = null;
+    let groupMiniSimInstance = null;
+    /** Assigned inside try once helpers exist; cleanup always calls a safe no-op if render failed. */
+    let teardownGroupMiniSimOnly = () => {};
     try {
       const containerWidth = svgRef.current.parentElement.clientWidth || 800;
       const containerHeight = window.innerHeight * 0.7 || 600;
@@ -893,7 +904,23 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
         }
       };
 
-      // Node drag/click does not run force simulations; DOM updates use pre-bucketed elements only.
+      // Columbia Barnard legacy: per-group mini simulation while dragging (hold). Optional via UI toggle.
+      teardownGroupMiniSimOnly = () => {
+        if (groupMiniSimInstance) {
+          groupMiniSimInstance.stop();
+          groupMiniSimInstance = null;
+        }
+      };
+
+      const resumeMainSimulationAfterGroupSim = () => {
+        simulation.alphaTarget(0);
+        simulation.alpha(0.08).restart();
+      };
+
+      const stopGroupMiniSimFully = () => {
+        teardownGroupMiniSimOnly();
+        resumeMainSimulationAfterGroupSim();
+      };
 
       const updateGroupMiniDom = (gi) => {
         const ns = nodesByGroup[gi];
@@ -914,6 +941,39 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
           const lk = d3.select(el).datum();
           d3.select(el).attr('d', arrowPathAtFraction(lk, 1 / 3));
         }
+      };
+
+      const startGroupMiniSim = (gi) => {
+        if (!interactivePhysicsRef.current) return false;
+        if (inClusterMode) return false;
+        if (!Number.isFinite(gi)) return false;
+        teardownGroupMiniSimOnly();
+        simulation.stop();
+
+        const groupNodes = data.nodes.filter((n) => n.__groupIndex === gi);
+        const groupLinks = data.links.filter((l) => {
+          const s = groupMap.get(l.source.id ?? l.source);
+          const t = groupMap.get(l.target.id ?? l.target);
+          return s === gi && t === gi;
+        });
+        if (groupNodes.length === 0) {
+          resumeMainSimulationAfterGroupSim();
+          return false;
+        }
+
+        groupMiniSimInstance = d3
+          .forceSimulation(groupNodes)
+          .force('link', d3.forceLink(groupLinks).id((n) => n.id).distance(300).strength(1))
+          .force('collision', d3.forceCollide().radius(80))
+          .alphaDecay(0)
+          .force('charge', d3.forceManyBody().strength(-1500))
+          .on('tick', () => {
+            clampNodesToDisk(groupNodes);
+            updateGroupMiniDom(gi);
+          });
+
+        groupMiniSimInstance.alpha(1).restart();
+        return true;
       };
 
       const clusterByGroup = Array.from({ length: groupCount }, () => null);
@@ -987,6 +1047,7 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
 
       const enterClusterMode = () => {
         inClusterMode = true;
+        teardownGroupMiniSimOnly();
 
         // DOM-cull all individual nodes/links while clustered.
         for (let gi = 0; gi < groupCount; gi++) {
@@ -1167,6 +1228,9 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
           const grp = groupMap.get(d.id);
           currentHighlight = (currentHighlight === grp ? null : grp);
           applyViewportHighlightClasses();
+          if (interactivePhysicsRef.current && currentHighlight == null) {
+            stopGroupMiniSimFully();
+          }
         }, 280);
       });
 
@@ -1249,6 +1313,9 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
       let dragHadMovement = false;
 
       const releaseActiveDrag = () => {
+        if (interactivePhysicsRef.current) {
+          stopGroupMiniSimFully();
+        }
         // Desktop should always release pinning after drag. On touch we preserve
         // the previous behavior (keep pinned) for direct-manipulation ergonomics.
         if (activeDragNode && !('ontouchstart' in window) && !navigator.maxTouchPoints) {
@@ -1277,9 +1344,13 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
         const p = clampNodeToDisk(d.x, d.y);
         d.fx = p.x;
         d.fy = p.y;
-        d.x = p.x;
-        d.y = p.y;
-        updateGroupMiniDom(gi);
+        if (interactivePhysicsRef.current) {
+          startGroupMiniSim(gi);
+        } else {
+          d.x = p.x;
+          d.y = p.y;
+          updateGroupMiniDom(gi);
+        }
       }
 
       function dragged(event, d) {
@@ -1287,9 +1358,11 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
         const c = clampNodeToDisk(event.x, event.y);
         d.fx = c.x;
         d.fy = c.y;
-        d.x = c.x;
-        d.y = c.y;
-        updateGroupMiniDom(groupMap.get(d.id));
+        if (!interactivePhysicsRef.current) {
+          d.x = c.x;
+          d.y = c.y;
+          updateGroupMiniDom(groupMap.get(d.id));
+        }
       }
 
       function dragended(event, d) {
@@ -1314,6 +1387,7 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
         window.removeEventListener('mouseup', handleGlobalDragRelease, true);
         window.removeEventListener('blur', handleGlobalDragRelease);
       }
+      teardownGroupMiniSimOnly();
       if (simulation) simulation.stop();
       if (zoomCleanupRef.current) {
         zoomCleanupRef.current();
@@ -1388,6 +1462,8 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
             setColorBy={setColorBy}
             nodes={data.nodes}
             darkSurface={darkSurface}
+            interactivePhysics={interactivePhysics}
+            setInteractivePhysics={setInteractivePhysics}
           />
           <Legend colorBy={colorBy} data={data} darkSurface={darkSurface} />
         </div>

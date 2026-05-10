@@ -8,6 +8,15 @@ type Props = {
 
 export default function NetworkGraph({ data }: Props) {
   const [colorBy, setColorBy] = useState('depth')
+  const [interactivePhysics, setInteractivePhysics] = useState(false)
   if (!data?.nodes?.length) return null
-  return <ColumbiaNetworkGraph colorBy={colorBy} setColorBy={setColorBy} data={data} />
+  return (
+    <ColumbiaNetworkGraph
+      colorBy={colorBy}
+      setColorBy={setColorBy}
+      data={data}
+      interactivePhysics={interactivePhysics}
+      setInteractivePhysics={setInteractivePhysics}
+    />
+  )
 }
