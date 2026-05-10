@@ -5,16 +5,26 @@ body {
   user-select: none;
   -webkit-user-select: none;
   -moz-user-select: none;
+  /* iOS/WebKit: suppress long-press image/link sheet (save, copy, subject lift)
+     so custom long-press gestures on the graph and chrome can fire. */
+  -webkit-touch-callout: none;
 }
 
 img {
   -webkit-user-drag: none;
+  -webkit-touch-callout: none;
+}
+
+canvas,
+svg {
+  -webkit-touch-callout: none;
 }
 
 input,
 textarea {
   user-select: text;
   -webkit-user-select: text;
+  -webkit-touch-callout: default;
 }
 
 .app-root-full {
