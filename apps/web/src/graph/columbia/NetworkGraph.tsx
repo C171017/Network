@@ -26,6 +26,8 @@ import {
   LINK_FORCE_DISTANCE,
   LINK_FORCE_DISTANCE_GROUP_MINI,
   LINK_FORCE_STRENGTH,
+  LONG_PRESS_MOVE_CANCEL_PX,
+  LONG_PRESS_MS,
   NODE_RADIUS
 } from './graphConstants';
 ////////////////////////////////////////////
@@ -264,7 +266,7 @@ function buildColorClusterCircles(groupNodes, getNodeColor, groupCenter) {
   return circles;
 }
 
-// Canvas: circle clip, soft rim; white↔grey onset and drag clamp share CANVAS_WHITE_INSET / OUTER_RADIUS.
+// Canvas: circle clip, soft rim; dark inner disk ↔ light outer; drag clamp shares CANVAS_WHITE_INSET / OUTER_RADIUS.
 const LEGACY_SQUARE_SIDE = 25000;
 const CANVAS_SCALE = 0.85;
 const CIRCLE_DIAMETER = LEGACY_SQUARE_SIDE * 1.5 * CANVAS_SCALE;
@@ -290,7 +292,8 @@ const NetworkGraph = ({
   setColorBy,
   data,
   interactivePhysics = false,
-  setInteractivePhysics
+  setInteractivePhysics,
+  onNodeCrawl
 }) => {
   const svgRef = useRef();
   const visualizationAreaRef = useRef(null);
@@ -300,6 +303,11 @@ const NetworkGraph = ({
   const zoomCleanupRef = useRef(null);
   const interactivePhysicsRef = useRef(interactivePhysics);
   interactivePhysicsRef.current = interactivePhysics;
+  // Latest onNodeCrawl callback, accessed inside long-press handlers without rebinding.
+  const onNodeCrawlRef = useRef(onNodeCrawl);
+  useEffect(() => {
+    onNodeCrawlRef.current = onNodeCrawl;
+  });
   const [colorMaps, setColorMaps] = useState({});
   const [darkSurface, setDarkSurface] = useState(false);
 
@@ -545,6 +553,7 @@ const NetworkGraph = ({
     let simulation = null;
     let nodeClickTimer = null;
     let groupMiniSimInstance = null;
+    let longPressTeardown = null;
     /** Assigned inside try once helpers exist; cleanup always calls a safe no-op if render failed. */
     let teardownGroupMiniSimOnly = () => {};
     try {
@@ -585,10 +594,10 @@ const NetworkGraph = ({
         .attr('fy', CIRCLE_CY)
         .attr('r', R_grad);
 
-      // Smoother black→white backdrop ramp (avoid visible “banding” / seam).
+      // Smoother black→white backdrop ramp (center dark → outer light; avoid visible “banding” / seam).
       // We generate many stops between a slightly earlier transition start and the
       // outer radius, using easing + a dense color interpolation.
-      const WHITE_EDGE = '#fafbfc';
+      const INNER_EDGE = '#0a0a0b';
       const transitionStartR = Math.max(0, CANVAS_WHITE_OUTER_RADIUS - H * 0.22);
       const fadeStartU = 0.94; // start fading to transparent only near the very edge
       const fadePow = 0.85; // lower = gentler fade curve
@@ -608,10 +617,10 @@ const NetworkGraph = ({
         '#000000',
       ]);
 
-      // Keep the early region flat/white so the inner disk feels crisp.
+      // Keep the early region flat/dark so the inner disk feels crisp.
       canvasEdgeGrad.append('stop')
         .attr('offset', '0%')
-        .attr('stop-color', WHITE_EDGE)
+        .attr('stop-color', INNER_EDGE)
         .attr('stop-opacity', 1);
 
       const smoothstep = (t) => t * t * (3 - 2 * t);
@@ -623,14 +632,14 @@ const NetworkGraph = ({
         const eased = smoothstep(u);
 
         // Fade only in the last ~6% of the radius; this preserves the “solid”
-        // look before blending into the black page background.
+        // look before blending into the white page background.
         const opacity = u < fadeStartU
           ? 1
           : Math.pow((1 - u) / (1 - fadeStartU), fadePow);
 
         canvasEdgeGrad.append('stop')
           .attr('offset', offset)
-          .attr('stop-color', colorInterp(eased))
+          .attr('stop-color', colorInterp(1 - eased))
           .attr('stop-opacity', opacity);
       }
 
@@ -1130,8 +1139,8 @@ const NetworkGraph = ({
         const wy = (sy - currentTransform.y) / currentTransform.k;
         const dist = Math.hypot(wx - CIRCLE_CX, wy - CIRCLE_CY);
 
-        // Outside/near outer ring is visually dark; inner disk is bright.
-        const uiIsDark = dist >= CANVAS_WHITE_OUTER_RADIUS * 1.02;
+        // Outside/near outer ring is visually light; inner disk is dark.
+        const uiIsDark = dist < CANVAS_WHITE_OUTER_RADIUS * 1.02;
         if (uiIsDark !== lastUiIsDark) {
           lastUiIsDark = uiIsDark;
           setDarkSurface(uiIsDark);
@@ -1389,6 +1398,110 @@ const NetworkGraph = ({
           if (el) el.style.display = 'none';
         });
 
+      // ── Long-press a node to crawl from it (hold-to-crawl) ───────────────
+      // Held without movement for LONG_PRESS_MS → call onNodeCrawl(d.login).
+      // Movement past LONG_PRESS_MOVE_CANCEL_PX cancels (becomes a drag/pan).
+      let longPressTimer = null;
+      let longPressStartX = 0;
+      let longPressStartY = 0;
+      let longPressActiveNode = null;
+      let longPressActiveRing = null;
+      // Set true when timer fires; OR'd into suppressNextClick by dragended so
+      // the post-press click doesn't toggle the group highlight.
+      let longPressFired = false;
+
+      const resetLongPressRing = () => {
+        if (!longPressActiveRing) return;
+        const ringSel = d3.select(longPressActiveRing);
+        ringSel.style('display', 'none')
+          .style('transition', 'none')
+          .attr('stroke-dasharray', null)
+          .attr('stroke-dashoffset', null);
+        longPressActiveRing = null;
+      };
+
+      const cancelLongPress = () => {
+        if (longPressTimer) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+        resetLongPressRing();
+        longPressActiveNode = null;
+      };
+
+      const onLongPressPointerMove = (event) => {
+        if (!longPressTimer) return;
+        const dx = event.clientX - longPressStartX;
+        const dy = event.clientY - longPressStartY;
+        if ((dx * dx + dy * dy) > (LONG_PRESS_MOVE_CANCEL_PX * LONG_PRESS_MOVE_CANCEL_PX)) {
+          cancelLongPress();
+        }
+      };
+
+      window.addEventListener('pointermove', onLongPressPointerMove, true);
+      window.addEventListener('pointerup', cancelLongPress, true);
+      window.addEventListener('pointercancel', cancelLongPress, true);
+      window.addEventListener('blur', cancelLongPress);
+
+      longPressTeardown = () => {
+        cancelLongPress();
+        window.removeEventListener('pointermove', onLongPressPointerMove, true);
+        window.removeEventListener('pointerup', cancelLongPress, true);
+        window.removeEventListener('pointercancel', cancelLongPress, true);
+        window.removeEventListener('blur', cancelLongPress);
+      };
+
+      node.on('pointerdown', function (event, d) {
+        // Mouse: only primary button; touch/pen: any.
+        if (event.pointerType === 'mouse' && event.button !== 0) return;
+        cancelLongPress();
+        longPressFired = false;
+        longPressStartX = event.clientX;
+        longPressStartY = event.clientY;
+        longPressActiveNode = d;
+
+        const ringSel = d3.select(this).select('.long-press-ring');
+        const ringNode = ringSel.node();
+        longPressActiveRing = ringNode;
+        if (ringNode) {
+          const r = NODE_RADIUS + 6;
+          const C = 2 * Math.PI * r;
+          ringSel
+            .style('display', null)
+            .style('transition', 'none')
+            .attr('stroke-dasharray', C)
+            .attr('stroke-dashoffset', C);
+          // Force a reflow so the transition kicks in from the full-empty state.
+          void ringNode.getBoundingClientRect();
+          ringSel
+            .style('transition', `stroke-dashoffset ${LONG_PRESS_MS}ms linear`)
+            .attr('stroke-dashoffset', 0);
+        }
+
+        longPressTimer = setTimeout(() => {
+          longPressTimer = null;
+          longPressFired = true;
+          resetLongPressRing();
+          const captured = longPressActiveNode;
+          longPressActiveNode = null;
+          // Release drag pin so the node isn't stuck where the press started.
+          if (captured) {
+            captured.fx = null;
+            captured.fy = null;
+          }
+          // Prevent the upcoming click (after pointerup) from toggling highlight.
+          suppressNextClick = true;
+          const login = captured?.login;
+          if (typeof login === 'string' && login.length > 0 && typeof onNodeCrawlRef.current === 'function') {
+            try {
+              onNodeCrawlRef.current(login);
+            } catch (err) {
+              console.error('onNodeCrawl failed:', err);
+            }
+          }
+        }, LONG_PRESS_MS);
+      });
+
       // ── Cluster interactivity (click-to-zoom) ───────────────────────────
       clusterGroupRecords.forEach(({ gi, sel }) => {
         const clusterSel = sel.style('pointer-events', 'auto');
@@ -1416,6 +1529,14 @@ const NetworkGraph = ({
           getNodeColor,
           simplified: false
         });
+
+        // Hidden progress ring used to visualize long-press (hold-to-crawl).
+        nodeGroup.append('circle')
+          .attr('class', 'long-press-ring')
+          .attr('r', NODE_RADIUS + 6)
+          .attr('fill', 'none')
+          .attr('pointer-events', 'none')
+          .style('display', 'none');
       });
 
       // Keep node centers inside the draggable inner disk
@@ -1502,9 +1623,11 @@ const NetworkGraph = ({
       }
 
       function dragended(event, d) {
-        // Only swallow the following click when this was a real drag; tap-to-select
-        // must not set this or `click` never runs highlight (see node.on('click')).
-        suppressNextClick = dragHadMovement;
+        // Only swallow the following click when this was a real drag, OR when a
+        // long-press just fired (so the crawl-trigger doesn't also toggle the
+        // group highlight). Tap-to-select keeps both flags false.
+        suppressNextClick = dragHadMovement || longPressFired;
+        longPressFired = false;
         // Ensure we release whichever node is actively tracked even if d differs.
         activeDragNode = activeDragNode || d;
         releaseActiveDrag();
@@ -1522,6 +1645,10 @@ const NetworkGraph = ({
       if (handleGlobalDragRelease) {
         window.removeEventListener('mouseup', handleGlobalDragRelease, true);
         window.removeEventListener('blur', handleGlobalDragRelease);
+      }
+      if (longPressTeardown) {
+        longPressTeardown();
+        longPressTeardown = null;
       }
       teardownGroupMiniSimOnly();
       if (simulation) simulation.stop();
@@ -1565,6 +1692,14 @@ const NetworkGraph = ({
         includeHub: false,
         includeDataAttrs: true
       });
+
+      // Re-add the long-press progress ring (removed by the wipe above).
+      nodeGroup.append('circle')
+        .attr('class', 'long-press-ring')
+        .attr('r', NODE_RADIUS + 6)
+        .attr('fill', 'none')
+        .attr('pointer-events', 'none')
+        .style('display', 'none');
     });
 
     // Rebuild cluster contents so the cloud blob's color mix reflects the

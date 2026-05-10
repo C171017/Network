@@ -12,6 +12,9 @@ type SessionInfo = {
   login: string
 }
 
+/** Persisted across the GitHub OAuth redirect so a long-press crawl can resume after sign-in. */
+const PENDING_CRAWL_KEY = 'network:pendingCrawlLogin'
+
 function readGithubLoginFromUser(user: User): string | null {
   const md = user.user_metadata as Record<string, unknown>
   const direct = md.user_name ?? md.preferred_username ?? md.name
@@ -146,22 +149,73 @@ export default function App() {
     setSession(null)
   }
 
-  async function loadGraph() {
-    if (!session || !effectiveRoot) return
-    setLoading(true)
-    setError(null)
+  const crawlFromLogin = useCallback(
+    async (login: string) => {
+      const target = login.trim()
+      if (!target) return
+      if (!session) {
+        if (!supabase) return
+        try {
+          window.sessionStorage.setItem(PENDING_CRAWL_KEY, target)
+        } catch {
+          /* sessionStorage may be unavailable (private mode); fall through to sign-in. */
+        }
+        setError(null)
+        const { error: oauthError } = await supabase.auth.signInWithOAuth({
+          provider: 'github',
+          options: {
+            redirectTo: `${window.location.origin}/`,
+            scopes: 'read:user',
+          },
+        })
+        if (oauthError) setError(oauthError.message)
+        return
+      }
+      setLoading(true)
+      setError(null)
+      try {
+        await expandGraph({
+          supabaseAccessToken: session.supabaseAccessToken,
+          githubAccessToken: session.githubAccessToken,
+          rootLogin: target,
+        })
+        await refreshGraphFromSql()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      } finally {
+        setLoading(false)
+      }
+    },
+    [session, refreshGraphFromSql],
+  )
+
+  // Resume a long-press crawl that was queued before the GitHub OAuth redirect.
+  useEffect(() => {
+    if (!session) return
+    let pending: string | null
     try {
-      await expandGraph({
-        supabaseAccessToken: session.supabaseAccessToken,
-        githubAccessToken: session.githubAccessToken,
-        rootLogin: effectiveRoot,
-      })
-      await refreshGraphFromSql()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setLoading(false)
+      pending = window.sessionStorage.getItem(PENDING_CRAWL_KEY)
+    } catch {
+      return
     }
+    if (!pending) return
+    try {
+      window.sessionStorage.removeItem(PENDING_CRAWL_KEY)
+    } catch {
+      /* ignore */
+    }
+    // Defer to a microtask so the synchronous effect body doesn't appear to
+    // call setState directly (crawlFromLogin will eventually call setLoading).
+    const resumeLogin = pending
+    const id = window.setTimeout(() => {
+      void crawlFromLogin(resumeLogin)
+    }, 0)
+    return () => window.clearTimeout(id)
+  }, [session, crawlFromLogin])
+
+  async function loadGraph() {
+    if (!effectiveRoot) return
+    await crawlFromLogin(effectiveRoot)
   }
 
   if (!isSupabaseConfigured) {
@@ -191,7 +245,7 @@ export default function App() {
 
       <div className="graph-host">
         {graph && graph.nodes.length > 0 ? (
-          <NetworkGraph data={graph} />
+          <NetworkGraph data={graph} onNodeCrawl={crawlFromLogin} />
         ) : graphLoading ? (
           <div className="graph-placeholder">Loading graph from database…</div>
         ) : (

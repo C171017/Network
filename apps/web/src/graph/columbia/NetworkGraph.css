@@ -22,7 +22,7 @@
   position: relative;
   touch-action: none;
   user-select: none;
-  background: #000;
+  background: #fff;
 }
 
 .control-panel {
@@ -41,7 +41,7 @@
 
 .network-graph {
   flex: 1;
-  background: black;
+  background: #fff;
   cursor: default;
   position: relative;
   z-index: 2;
@@ -56,8 +56,8 @@
   max-height: min(42vh, 320px);
   overflow: auto;
   padding: 10px 14px;
-  background: rgba(0, 0, 0, 0.88);
-  color: #f3f4f6;
+  background: rgba(255, 255, 255, 0.94);
+  color: #111827;
   font-size: 12px;
   line-height: 1.45;
   white-space: pre-wrap;
@@ -66,8 +66,8 @@
   pointer-events: none;
   font-family: var(--font-sans);
   text-align: left;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
+  border: 1px solid rgba(0, 0, 0, 0.12);
 }
 
 .physics-toggle-anchor {
@@ -91,7 +91,7 @@
   pointer-events: none;
   font-family: var(--font-sans);
   font-weight: 600;
-  text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff;
+  text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
   letter-spacing: .02em;
 }
 
@@ -99,6 +99,24 @@
 .node:hover circle.node-outline {
   stroke: #202124;
   stroke-width: 2px;
+}
+
+/* Long-press progress ring (hold-to-crawl). Stroke fills clockwise from 12 o'clock. */
+.long-press-ring {
+  stroke: #2563eb;
+  stroke-width: 3;
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0.95;
+  pointer-events: none;
+}
+
+/* Hover-on-node should not paint a black outline on the long-press ring. */
+.node:hover circle.long-press-ring {
+  stroke: #2563eb;
+  stroke-width: 3;
 }
 
 .link-full {
@@ -142,8 +160,8 @@
   position: absolute;
   bottom: 15px;
   left: 15px;
-  background: rgba(0,0,0,.6);
-  color: #fff;
+  background: rgba(255, 255, 255, 0.85);
+  color: #111827;
   border-radius: 4px;
   font-size: 12px;
   opacity: .7;

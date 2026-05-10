@@ -27,6 +27,11 @@ export const LINK_WEDGE_SOURCE_HALF_WIDTH = 2.4
 export const LINK_WEDGE_TARGET_HALF_WIDTH = 0.3
 export const LINK_WEDGE_MUTUAL_OFFSET = 6
 
+/** Hold duration (ms) on a node before it triggers a crawl from that node. */
+export const LONG_PRESS_MS = 800
+/** Pointer movement (px) during a long-press that cancels it (treated as drag/pan instead). */
+export const LONG_PRESS_MOVE_CANCEL_PX = 6
+
 export const ZOOM_MIN_DESKTOP = 0.03
 export const ZOOM_MAX_DESKTOP = 0.8
 export const ZOOM_MIN_MOBILE = 0.01
