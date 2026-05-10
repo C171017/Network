@@ -5,6 +5,82 @@
   width: 100%;
   margin-bottom: 0;
 }
+
+.physics-mode-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: var(--spacing-sm);
+  text-align: center;
+}
+
+.physics-mode-toggle {
+  padding: 10px 18px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background-color: rgba(248, 250, 252, 0.12);
+  color: rgba(17, 24, 39, 0.94);
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI Variable Display', 'Segoe UI', Inter, sans-serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 6px 18px rgba(7, 14, 27, 0.22);
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s,
+    background-color 0.2s;
+}
+
+.physics-mode-toggle:hover {
+  border-color: rgba(255, 255, 255, 0.42);
+  background: rgba(248, 250, 252, 0.22);
+}
+
+.physics-mode-toggle[aria-pressed='true'] {
+  border-color: rgba(59, 130, 246, 0.55);
+  background: rgba(59, 130, 246, 0.18);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 0 0 2px rgba(59, 130, 246, 0.25);
+}
+
+.physics-mode-hint {
+  font-size: 0.82rem;
+  line-height: 1.35;
+  color: rgba(17, 24, 39, 0.72);
+  max-width: 28rem;
+}
+
+.control-panel.dark-surface .physics-mode-toggle {
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background-color: rgba(17, 24, 39, 0.56);
+  color: rgba(248, 250, 252, 0.96);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 8px 22px rgba(0, 0, 0, 0.35);
+}
+
+.control-panel.dark-surface .physics-mode-toggle:hover {
+  border-color: rgba(255, 255, 255, 0.38);
+  background: rgba(17, 24, 39, 0.68);
+}
+
+.control-panel.dark-surface .physics-mode-toggle[aria-pressed='true'] {
+  border-color: rgba(96, 165, 250, 0.55);
+  background: rgba(59, 130, 246, 0.22);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 0 0 2px rgba(96, 165, 250, 0.22);
+}
+
+.control-panel.dark-surface .physics-mode-hint {
+  color: rgba(248, 250, 252, 0.78);
+}
+
 .control-panel:hover {
   transform: translateY(-3px);
 }
@@ -125,5 +201,21 @@
     font-size: 0.92rem;
     background-position: right 10px center;
     background-size: 13px 8px;
+  }
+
+  .physics-mode-row {
+    margin-bottom: 8px;
+  }
+
+  .physics-mode-toggle {
+    width: 100%;
+    max-width: none;
+    font-size: 0.9rem;
+    padding: 10px 14px;
+  }
+
+  .physics-mode-hint {
+    font-size: 0.76rem;
+    padding: 0 4px;
   }
 }

@@ -1,3 +1,4 @@
+import * as d3 from 'd3'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ControlPanel from './ControlPanel'
 import Legend from './Legend'
@@ -88,6 +89,12 @@ export default function ColumbiaNetworkGraph({ colorBy, setColorBy, data }: Prop
     return buildColorMaps(n)
   }, [data.nodes])
   const [darkSurface, setDarkSurface] = useState(false)
+  const [physicsInteractionMode, setPhysicsInteractionMode] = useState(false)
+  const physicsInteractionModeRef = useRef(false)
+  useEffect(() => {
+    physicsInteractionModeRef.current = physicsInteractionMode
+  }, [physicsInteractionMode])
+
   const [inClusterMode, setInClusterMode] = useState(false)
   const [visibleGroups, setVisibleGroups] = useState<Set<number>>(new Set())
   const [highlightGroup, setHighlightGroup] = useState<number | null>(null)
@@ -251,13 +258,26 @@ export default function ColumbiaNetworkGraph({ colorBy, setColorBy, data }: Prop
 
   /* eslint-disable react-hooks/set-state-in-effect -- cluster threshold is derived from zoom */
   useEffect(() => {
+    if (physicsInteractionMode) {
+      if (inClusterMode) setInClusterMode(false)
+      recomputeVisibleGroups(transform, false)
+      return
+    }
     const want = isClusterWanted(transform, inClusterMode)
     if (want !== inClusterMode) {
       setInClusterMode(want)
       return
     }
     recomputeVisibleGroups(transform, clusterUiActive)
-  }, [transform, inClusterMode, clusterUiActive, isClusterWanted, recomputeVisibleGroups, nodes])
+  }, [
+    transform,
+    inClusterMode,
+    clusterUiActive,
+    isClusterWanted,
+    recomputeVisibleGroups,
+    nodes,
+    physicsInteractionMode,
+  ])
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const updateUiSurfaceTheme = useCallback(() => {
@@ -294,6 +314,7 @@ export default function ColumbiaNetworkGraph({ colorBy, setColorBy, data }: Prop
   const draggingRef = useRef<{
     id: number
     hadMove: boolean
+    physics?: boolean
   } | null>(null)
 
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -305,15 +326,72 @@ export default function ColumbiaNetworkGraph({ colorBy, setColorBy, data }: Prop
   }, [])
 
   const nodesRef = useRef(nodes)
+  const linksRef = useRef(links)
   const groupMapRef = useRef(groupMap)
   const inClusterModeRef = useRef(inClusterMode)
   const clusterRecordsRef = useRef(clusterRecords)
+  const groupMiniSimRef = useRef<d3.Simulation<LayoutNode, undefined> | null>(null)
+
   useEffect(() => {
     nodesRef.current = nodes
+    linksRef.current = links
     groupMapRef.current = groupMap
     inClusterModeRef.current = clusterUiActive
     clusterRecordsRef.current = clusterRecords
-  }, [nodes, groupMap, clusterUiActive, clusterRecords])
+  }, [nodes, links, groupMap, clusterUiActive, clusterRecords])
+
+  const stopGroupMiniSimFully = useCallback(() => {
+    if (groupMiniSimRef.current) {
+      groupMiniSimRef.current.stop()
+      groupMiniSimRef.current = null
+    }
+  }, [])
+
+  const startGroupMiniSim = useCallback(
+    (gi: number) => {
+      if (inClusterModeRef.current) return false
+      if (!Number.isFinite(gi)) return false
+      stopGroupMiniSimFully()
+
+      const groupNodes = nodesRef.current.filter((n) => (n.__groupIndex ?? 0) === gi)
+      const groupLinks = linksRef.current.filter((l) => {
+        const sgi = l.source.__groupIndex ?? 0
+        const tgi = l.target.__groupIndex ?? 0
+        return l.__groupIndex === gi && sgi === gi && tgi === gi
+      })
+      if (groupNodes.length === 0) return false
+
+      let raf = 0
+      const sim = d3
+        .forceSimulation(groupNodes)
+        .force(
+          'link',
+          d3
+            .forceLink<LayoutNode, ResolvedLink>(groupLinks)
+            .id((n: LayoutNode) => String(n.id))
+            .distance(300)
+            .strength(1)
+        )
+        .force('collision', d3.forceCollide<LayoutNode>().radius(80))
+        .alphaDecay(0)
+        .force('charge', d3.forceManyBody<LayoutNode>().strength(-1500))
+
+      sim.on('tick', () => {
+        clampNodesInPlace(groupNodes)
+        if (!raf) {
+          raf = requestAnimationFrame(() => {
+            raf = 0
+            setNodes([...nodesRef.current])
+          })
+        }
+      })
+
+      groupMiniSimRef.current = sim
+      sim.alpha(1).restart()
+      return true
+    },
+    [stopGroupMiniSimFully]
+  )
 
   const zoomToCluster = useCallback(
     (gi: number) => {
@@ -394,6 +472,16 @@ export default function ColumbiaNetworkGraph({ colorBy, setColorBy, data }: Prop
         if (nid != null) {
           const n = nodesRef.current.find((x) => x.id === nid)
           if (n) {
+            if (physicsInteractionModeRef.current) {
+              const gi = n.__groupIndex ?? 0
+              startGroupMiniSim(gi)
+              const c = clampNodeCenterToMovableDisk(w.x, w.y)
+              const pin = n as LayoutNode & { fx?: number | null; fy?: number | null }
+              pin.fx = c.x
+              pin.fy = c.y
+              draggingRef.current = { id: nid, hadMove: false, physics: true }
+              return
+            }
             draggingRef.current = { id: nid, hadMove: false }
             return
           }
@@ -437,6 +525,15 @@ export default function ColumbiaNetworkGraph({ colorBy, setColorBy, data }: Prop
         const w = screenToWorld(e.clientX, e.clientY, rect, transformRef.current)
         const c = clampNodeCenterToMovableDisk(w.x, w.y)
         drag.hadMove = true
+        if (drag.physics) {
+          const n = nodesRef.current.find((x) => x.id === drag.id)
+          if (n) {
+            const pin = n as LayoutNode & { fx?: number | null; fy?: number | null }
+            pin.fx = c.x
+            pin.fy = c.y
+          }
+          return
+        }
         setNodes((prev) =>
           prev.map((n) => (n.id === drag.id ? { ...n, x: c.x, y: c.y } : n))
         )
@@ -457,17 +554,35 @@ export default function ColumbiaNetworkGraph({ colorBy, setColorBy, data }: Prop
       if (drag) {
         suppressClickRef.current = drag.hadMove
         draggingRef.current = null
-        setNodes((prev) => {
-          const copy = prev.map((n) => ({ ...n }))
-          resolveOverlaps(copy)
-          clampNodesInPlace(copy)
-          return copy
-        })
+        const touchLike = navigator.maxTouchPoints > 0
+        if (drag.physics) {
+          stopGroupMiniSimFully()
+          setNodes((prev) => {
+            const copy = prev.map((n) => ({ ...n }))
+            const dragged = copy.find((x) => x.id === drag.id)
+            if (dragged && !touchLike) {
+              const pin = dragged as LayoutNode & { fx?: number | null; fy?: number | null }
+              pin.fx = null
+              pin.fy = null
+            }
+            resolveOverlaps(copy)
+            clampNodesInPlace(copy)
+            return copy
+          })
+        } else {
+          setNodes((prev) => {
+            const copy = prev.map((n) => ({ ...n }))
+            resolveOverlaps(copy)
+            clampNodesInPlace(copy)
+            return copy
+          })
+        }
       }
       endPanOrPinch(e)
     }
 
     const onPointerCancel = (e: PointerEvent) => {
+      if (draggingRef.current?.physics) stopGroupMiniSimFully()
       draggingRef.current = null
       endPanOrPinch(e)
     }
@@ -536,6 +651,7 @@ export default function ColumbiaNetworkGraph({ colorBy, setColorBy, data }: Prop
     host.addEventListener('dblclick', onDblClick)
 
     return () => {
+      stopGroupMiniSimFully()
       host.removeEventListener('wheel', onWheel)
       host.removeEventListener('pointerdown', onPointerDown)
       host.removeEventListener('pointermove', onPointerMove)
@@ -545,7 +661,7 @@ export default function ColumbiaNetworkGraph({ colorBy, setColorBy, data }: Prop
       host.removeEventListener('dblclick', onDblClick)
       if (clickTimerRef.current) clearTimeout(clickTimerRef.current)
     }
-  }, [minMaxK, zoomToCluster])
+  }, [minMaxK, zoomToCluster, startGroupMiniSim, stopGroupMiniSimFully])
 
   const desktopSafariClass = isDesktopSafariBrowser() ? ' desktop-safari' : ''
 
@@ -574,6 +690,8 @@ export default function ColumbiaNetworkGraph({ colorBy, setColorBy, data }: Prop
             setColorBy={setColorBy}
             nodes={data.nodes}
             darkSurface={darkSurface}
+            physicsInteractionMode={physicsInteractionMode}
+            setPhysicsInteractionMode={setPhysicsInteractionMode}
           />
           <Legend colorBy={colorBy} data={data} darkSurface={darkSurface} />
         </div>
