@@ -443,10 +443,7 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
     // Declared outside `try` so effect cleanup can remove listeners / stop simulators safely.
     let handleGlobalDragRelease = null;
     let simulation = null;
-    let groupMiniSimInstance = null;
     let nodeClickTimer = null;
-    /** Assigned inside try once helpers exist; cleanup always calls a safe no-op if render failed. */
-    let teardownGroupMiniSimOnly = () => {};
     try {
       const containerWidth = svgRef.current.parentElement.clientWidth || 800;
       const containerHeight = window.innerHeight * 0.7 || 600;
@@ -896,25 +893,7 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
         }
       };
 
-      // Per-group mini simulation while dragging a node (hold); clicks only toggle highlight/focus.
-      // DOM updates use pre-bucketed elements only — never selectAll + filter each tick.
-
-      teardownGroupMiniSimOnly = () => {
-        if (groupMiniSimInstance) {
-          groupMiniSimInstance.stop();
-          groupMiniSimInstance = null;
-        }
-      };
-
-      const resumeMainSimulationAfterGroupSim = () => {
-        simulation.alphaTarget(0);
-        simulation.alpha(0.08).restart();
-      };
-
-      const stopGroupMiniSimFully = () => {
-        teardownGroupMiniSimOnly();
-        resumeMainSimulationAfterGroupSim();
-      };
+      // Node drag/click does not run force simulations; DOM updates use pre-bucketed elements only.
 
       const updateGroupMiniDom = (gi) => {
         const ns = nodesByGroup[gi];
@@ -935,38 +914,6 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
           const lk = d3.select(el).datum();
           d3.select(el).attr('d', arrowPathAtFraction(lk, 1 / 3));
         }
-      };
-
-      const startGroupMiniSim = (gi) => {
-        if (inClusterMode) return false;
-        if (!Number.isFinite(gi)) return false;
-        teardownGroupMiniSimOnly();
-        simulation.stop();
-
-        const groupNodes = data.nodes.filter((n) => n.__groupIndex === gi);
-        const groupLinks = data.links.filter((l) => {
-          const s = groupMap.get(l.source.id ?? l.source);
-          const t = groupMap.get(l.target.id ?? l.target);
-          return s === gi && t === gi;
-        });
-        if (groupNodes.length === 0) {
-          resumeMainSimulationAfterGroupSim();
-          return false;
-        }
-
-        groupMiniSimInstance = d3
-          .forceSimulation(groupNodes)
-          .force('link', d3.forceLink(groupLinks).id((n) => n.id).distance(300).strength(1))
-          .force('collision', d3.forceCollide().radius(80))
-          .alphaDecay(0)
-          .force('charge', d3.forceManyBody().strength(-1500))
-          .on('tick', () => {
-            clampNodesToDisk(groupNodes);
-            updateGroupMiniDom(gi);
-          });
-
-        groupMiniSimInstance.alpha(1).restart();
-        return true;
       };
 
       const clusterByGroup = Array.from({ length: groupCount }, () => null);
@@ -1220,9 +1167,6 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
           const grp = groupMap.get(d.id);
           currentHighlight = (currentHighlight === grp ? null : grp);
           applyViewportHighlightClasses();
-          if (currentHighlight == null) {
-            stopGroupMiniSimFully();
-          }
         }, 280);
       });
 
@@ -1305,8 +1249,6 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
       let dragHadMovement = false;
 
       const releaseActiveDrag = () => {
-        // Stop any in-group sim that was sustained during drag before resuming globals.
-        stopGroupMiniSimFully();
         // Desktop should always release pinning after drag. On touch we preserve
         // the previous behavior (keep pinned) for direct-manipulation ergonomics.
         if (activeDragNode && !('ontouchstart' in window) && !navigator.maxTouchPoints) {
@@ -1332,12 +1274,12 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
 
         activeDragNode = d;
         const gi = groupMap.get(d.id);
-        // Pause global sim; run in-group physics for the dragged cluster until drag ends.
-        startGroupMiniSim(gi);
-
         const p = clampNodeToDisk(d.x, d.y);
         d.fx = p.x;
         d.fy = p.y;
+        d.x = p.x;
+        d.y = p.y;
+        updateGroupMiniDom(gi);
       }
 
       function dragged(event, d) {
@@ -1345,6 +1287,9 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
         const c = clampNodeToDisk(event.x, event.y);
         d.fx = c.x;
         d.fy = c.y;
+        d.x = c.x;
+        d.y = c.y;
+        updateGroupMiniDom(groupMap.get(d.id));
       }
 
       function dragended(event, d) {
@@ -1369,7 +1314,6 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
         window.removeEventListener('mouseup', handleGlobalDragRelease, true);
         window.removeEventListener('blur', handleGlobalDragRelease);
       }
-      teardownGroupMiniSimOnly();
       if (simulation) simulation.stop();
       if (zoomCleanupRef.current) {
         zoomCleanupRef.current();
