@@ -542,9 +542,10 @@ function renderNodeVisual(nodeGroup, d, nodePathInfo, options) {
 //////////////////////////////////////////////////////
 
 
-// Zoom: max pinch/zoom-in is capped per breakpoint. Min zoom (= initial load scale) is derived
-// from the same viewport fit as `translate(width/2,h/2).scale(k).translate(-cx,-cy)` so the
-// d3 zoom factor `k` at start always equals scaleExtent[0] (cannot zoom out past the fitted view).
+// Zoom: max pinch/zoom-in is capped per breakpoint. Min zoom (= initial load scale) uses
+// `scaleExtent[0]`; baseline is either background-image long-edge fit (see module helpers) or legacy
+// scene fit — both pair with `translate(width/2,h/2).scale(k).translate(-cx,-cy)` so the disk center
+// starts in the middle of the viewport.
 const ZOOM_MAX_DESKTOP = 1.55;
 const ZOOM_MAX_MOBILE = 1.2;
 
@@ -688,8 +689,42 @@ const BACKGROUND_PAN_EXTENT_WORLD = [
   ],
 ];
 
+/**
+ * Min/default zoom: one side of the square background (world) maps to the viewport’s **longer**
+ * pixel edge. The shorter edge only shows a band of the image; pan along that axis to see the rest.
+ * Rollback to the old “fit circular scene in min(w,h)” behavior by setting to false.
+ */
+const ZOOM_MIN_USE_BACKGROUND_LONG_EDGE = true;
+
+/**
+ * Legacy baseline scale: fit `VISUAL_SCENE_EXTENT` inside min(container width, height).
+ * Used when `ZOOM_MIN_USE_BACKGROUND_LONG_EDGE` is false.
+ */
+function computeZoomMinLegacySceneFit(containerWidth, containerHeight, zoomMaxCap) {
+  const scaleX = containerWidth / VISUAL_SCENE_EXTENT;
+  const scaleY = containerHeight / VISUAL_SCENE_EXTENT;
+  const fitScale = Math.min(scaleX, scaleY);
+  return Math.min(fitScale, zoomMaxCap);
+}
+
+/** New baseline: max(w,h) / `BACKGROUND_IMAGE_SIZE`, capped by zoom max. */
+function computeZoomMinBackgroundImageLongEdge(containerWidth, containerHeight, zoomMaxCap) {
+  const longEdgePx = Math.max(1, containerWidth, containerHeight);
+  const baseline = longEdgePx / BACKGROUND_IMAGE_SIZE;
+  return Math.min(baseline, zoomMaxCap);
+}
+
+function clampZoomTransformScale(t, kMin, kMax) {
+  const k = Math.min(kMax, Math.max(kMin, t.k));
+  if (k === t.k) return t;
+  return d3.zoomIdentity.translate(t.x, t.y).scale(k);
+}
+
 /** Widen the logo’s dark zone vs panel math so blackback kicks in at the edge of the ramp, not only when fully black. */
 const LOGO_DARK_DISK_RADIUS_FACTOR = 1.06;
+
+/** Dedupe logo-driven refocus: same `{ login, nonce }` must not replay after graph API gaps / full rebuilds / Strict Mode. */
+const FOCUS_LOGIN_NONCE_STORAGE_PREFIX = 'network:focus-login-nonce-v1:';
 
 // clamping and color-map helpers are extracted in feature modules.
 
@@ -819,12 +854,9 @@ const NetworkGraph = ({
     const mobile = isMobileViewport();
     const ZOOM_MAX = mobile ? ZOOM_MAX_MOBILE : ZOOM_MAX_DESKTOP;
 
-    const scaleX = containerWidth / VISUAL_SCENE_EXTENT;
-    const scaleY = containerHeight / VISUAL_SCENE_EXTENT;
-    const fitScale = Math.min(scaleX, scaleY);
-    // If the viewport is so large that "fit entire scene" would exceed max zoom-in, clamp to max;
-    // min and max then coincide (no zoom headroom outward).
-    const ZOOM_MIN = Math.min(fitScale, ZOOM_MAX);
+    const ZOOM_MIN = ZOOM_MIN_USE_BACKGROUND_LONG_EDGE
+      ? computeZoomMinBackgroundImageLongEdge(containerWidth, containerHeight, ZOOM_MAX)
+      : computeZoomMinLegacySceneFit(containerWidth, containerHeight, ZOOM_MAX);
 
     // onTransformChange(transform, phase): `active` during gesture; `end` when d3-zoom ends (wheel stop, pinch end, transition end).
     const zoom = d3.zoom()
@@ -855,12 +887,13 @@ const NetworkGraph = ({
       .scale(ZOOM_MIN)
       .translate(-CIRCLE_CX, -CIRCLE_CY);
 
-    const appliedTransform =
+    let appliedTransform =
       persistedZoomTransform != null
       && typeof persistedZoomTransform.k === 'number'
       && Number.isFinite(persistedZoomTransform.k)
         ? persistedZoomTransform
         : initialTransform;
+    appliedTransform = clampZoomTransformScale(appliedTransform, ZOOM_MIN, ZOOM_MAX);
 
     svg.call(zoom)
       .call(zoom.transform, appliedTransform)
@@ -2631,16 +2664,52 @@ const NetworkGraph = ({
     if (api) api.session = authenticatedSession;
   }, [authenticatedSession]);
 
-  // Monotonic dataset growth (streaming expand): update simulation/DOM without resetting zoom.
+  // Recentre on the authenticated user when `nonce` bumps (logo click). Intentionally omit `data`
+  // from deps: streamed expand ticks would rerun this every topology update and replay the zoom.
   useEffect(() => {
     if (!focusLoginRequest?.login) return undefined;
-    const api = graphLiveApiRef.current;
-    if (api?.focusLogin?.(focusLoginRequest.login)) return undefined;
-    const id = window.setTimeout(() => {
-      graphLiveApiRef.current?.focusLogin?.(focusLoginRequest.login);
-    }, 0);
-    return () => window.clearTimeout(id);
-  }, [focusLoginRequest?.nonce, focusLoginRequest?.login, data]);
+    const login = focusLoginRequest.login;
+    const nonce =
+      typeof focusLoginRequest.nonce === 'number' && Number.isFinite(focusLoginRequest.nonce)
+        ? focusLoginRequest.nonce
+        : 0;
+
+    const storageKey = `${FOCUS_LOGIN_NONCE_STORAGE_PREFIX}${encodeURIComponent(login)}`;
+    try {
+      const prevRaw = window.sessionStorage.getItem(storageKey);
+      if (prevRaw != null && prevRaw !== '' && Number(prevRaw) === nonce) return undefined;
+    } catch {
+      /* sessionStorage may be unavailable (private mode) */
+    }
+
+    let cancelled = false;
+    let attempts = 0;
+    const maxAttempts = 40;
+    const delayMs = 50;
+    let timeoutId = null;
+
+    function tick() {
+      if (cancelled) return;
+      if (graphLiveApiRef.current?.focusLogin?.(login)) {
+        try {
+          window.sessionStorage.setItem(storageKey, String(nonce));
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      attempts += 1;
+      if (attempts >= maxAttempts) return;
+      timeoutId = window.setTimeout(tick, delayMs);
+    }
+
+    tick();
+    return () => {
+      cancelled = true;
+      if (timeoutId != null) window.clearTimeout(timeoutId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- retry until coords exist; must not rerun on streamed `data`
+  }, [focusLoginRequest?.nonce, focusLoginRequest?.login]);
 
   useEffect(() => {
     const api = graphLiveApiRef.current;
