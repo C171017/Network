@@ -33,9 +33,28 @@ import {
 ////////////////////////////////////////////
 ////////////////////////////////////////////
 
-/** Present GitHub profile payload fields first; append remaining scalar keys. */
+/** Never surfaced in hover (still used elsewhere, e.g. dbl‑click opens profile). */
+const HOVER_HIDDEN_PROFILE_KEYS = new Set(['login', 'public_repos', 'public_gists', 'html_url', 'type']);
+
+/** Prefer this order when reading from `profile` for extra rows. */
 const PROFILE_HOVER_PRIORITY = [
-  'login',
+  'name',
+  'bio',
+  'company',
+  'location',
+  'blog',
+  'email',
+  'twitter_username',
+  'organizations',
+  'hireable',
+  'followers',
+  'following',
+  'created_at',
+  'updated_at'
+];
+
+/** Shown outside the DL (chips / title / omitted JSON). */
+const HOVER_KEYS_RENDERED_ABOVE = new Set([
   'name',
   'bio',
   'company',
@@ -44,47 +63,268 @@ const PROFILE_HOVER_PRIORITY = [
   'email',
   'twitter_username',
   'social_accounts',
-  'organizations',
-  'hireable',
-  'public_repos',
-  'public_gists',
-  'followers',
-  'following',
-  'created_at',
-  'updated_at',
-  'html_url',
-  'type'
-];
+  'organizations'
+]);
 
-function formatNodeHoverText(d) {
-  const p = d.profile;
-  if (p && typeof p === 'object' && !Array.isArray(p)) {
-    const lines = [];
-    const shown = new Set();
+function hoverNormalizeHrefKey(href) {
+  try {
+    const u = new URL(String(href).trim());
+    u.hash = '';
+    let path = u.pathname.replace(/\/+$/, '');
+    if (path.toLowerCase() === '') path = '';
+    let host = u.hostname.replace(/^www\./i, '').toLowerCase();
+    if (host === 'x.com') host = 'twitter.com';
+    if (host === 'twitter.com') {
+      path = path.toLowerCase();
+    } else if (host === 'github.com') {
+      path = path.toLowerCase();
+    }
+    return `${host}${path}`;
+  } catch {
+    return String(href).trim().toLowerCase().replace(/\/+$/, '');
+  }
+}
+
+function hoverSocialChipLabel(providerRaw) {
+  const p = String(providerRaw ?? '').trim().toLowerCase().replace(/\s+/g, '_').replace(/-/g, '_');
+  if (!p) return 'Link';
+  if (p === 'twitter' || p === 'x') return 'X / Twitter';
+  if (p === 'bluesky') return 'Bluesky';
+  if (p === 'linkedin') return 'LinkedIn';
+  if (p === 'mastodon') return 'Mastodon';
+  if (p === 'youtube') return 'YouTube';
+  if (p === 'facebook') return 'Facebook';
+  return humanizeHoverKey(p);
+}
+
+/** GitHub `/users/{login}/orgs`-style payloads: `{ login }` entries or bare login strings. */
+function hoverExtractOrgLogin(entry) {
+  if (typeof entry === 'string') return hoverTrim(entry);
+  if (entry != null && typeof entry === 'object' && hoverTrim(entry.login)) return hoverTrim(entry.login);
+  return '';
+}
+
+function hoverTrim(v) {
+  if (v == null) return '';
+  const s = String(v).trim();
+  return s;
+}
+
+function humanizeHoverKey(key) {
+  return String(key)
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** Blog / legacy website field → navigable URL, or null. */
+function hoverBlogHref(raw) {
+  const s = hoverTrim(raw);
+  if (!s) return null;
+  if (/^https?:\/\//i.test(s)) return s;
+  if (/^www\./i.test(s)) return `https://${s}`;
+  return null;
+}
+
+/** True when we should render a scalar row (excludes null, '', whitespace; keeps numeric 0). */
+function hoverScalarIsPresent(val) {
+  if (val == null) return false;
+  if (typeof val === 'number') return Number.isFinite(val);
+  if (typeof val === 'boolean') return true;
+  if (typeof val === 'string') return hoverTrim(val) !== '';
+  return false;
+}
+
+function formatHoverScalar(key, val) {
+  if (typeof val === 'boolean') return val ? 'Yes' : '';
+  if (key.endsWith('_at') || key === 'updated_at' || key === 'created_at') {
+    const parsed = new Date(val);
+    if (Number.isNaN(parsed.getTime())) return '';
+    return parsed.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  }
+  if (typeof val === 'number' && Number.isFinite(val)) return String(val);
+  const s = String(val);
+  return hoverTrim(s);
+}
+
+function hoverAppendDlRow(dl, dtText, ddText) {
+  const dt = document.createElement('dt');
+  dt.className = 'graph-hover-dt';
+  dt.textContent = dtText;
+  const dd = document.createElement('dd');
+  dd.className = 'graph-hover-dd';
+  dd.textContent = ddText;
+  dl.appendChild(dt);
+  dl.appendChild(dd);
+}
+
+/**
+ * Builds structured hover markup (glass card + semantic sections + real links).
+ * Omits login as title when it matches display name; no raw JSON for social / orgs.
+ */
+function renderNodeHoverPanel(el, d) {
+  while (el.firstChild) el.removeChild(el.firstChild);
+
+  const panel = document.createElement('div');
+  panel.className = 'graph-hover-panel';
+
+  const p = d.profile && typeof d.profile === 'object' && !Array.isArray(d.profile) ? d.profile : null;
+
+  const loginCanon = hoverTrim(String(d.login ?? '')).toLowerCase();
+  const rawProfileName = hoverTrim(d.name) || hoverTrim(p?.name) || '';
+  const displayName =
+    rawProfileName && rawProfileName.toLowerCase() !== loginCanon ? rawProfileName : '';
+
+  const bio = hoverTrim(d.bio) || hoverTrim(p?.bio) || '';
+  const company = hoverTrim(d.company) || hoverTrim(p?.company) || '';
+  const location = hoverTrim(d.location) || hoverTrim(p?.location) || '';
+  const metaLine = [company, location].filter(Boolean).join(' · ');
+
+  const blogHref =
+    hoverBlogHref(p?.blog) ||
+    hoverBlogHref(d.websiteUrl) ||
+    null;
+  const emailRaw = hoverTrim(p?.email);
+  const twitterRaw = hoverTrim(p?.twitter_username);
+
+  const head = document.createElement('div');
+  head.className = 'graph-hover-head';
+
+  const titleEl = document.createElement('div');
+  titleEl.className = 'graph-hover-title';
+  if (displayName) {
+    titleEl.textContent = displayName;
+  } else if (metaLine) {
+    titleEl.textContent = metaLine;
+  } else {
+    titleEl.classList.add('graph-hover-title-muted');
+    titleEl.textContent = bio ? 'Profile' : 'GitHub profile';
+  }
+  head.appendChild(titleEl);
+
+  if (displayName && metaLine) {
+    const meta = document.createElement('div');
+    meta.className = 'graph-hover-meta';
+    meta.textContent = metaLine;
+    head.appendChild(meta);
+  }
+
+  panel.appendChild(head);
+
+  if (bio) {
+    const bioEl = document.createElement('p');
+    bioEl.className = 'graph-hover-bio';
+    bioEl.textContent = bio;
+    panel.appendChild(bioEl);
+  }
+
+  const rawProfileUrl = d.profileUrl != null ? hoverTrim(d.profileUrl) : '';
+  const profileOpenHref =
+    rawProfileUrl.length > 0
+      ? rawProfileUrl
+      : `https://github.com/${encodeURIComponent(String(d.login ?? ''))}`;
+
+  const hrefDedupe = new Set();
+  function hoverAddChip(linksRow, href, label) {
+    const h = hoverTrim(href);
+    if (!h) return;
+    let dedupeKey;
+    if (/^mailto:/i.test(h)) {
+      dedupeKey = h.replace(/\s/g, '').toLowerCase();
+    } else if (/^https?:\/\//i.test(h)) {
+      dedupeKey = hoverNormalizeHrefKey(h);
+    } else {
+      dedupeKey = h.toLowerCase();
+    }
+    if (hrefDedupe.has(dedupeKey)) return;
+    hrefDedupe.add(dedupeKey);
+
+    const a = document.createElement('a');
+    a.className = 'graph-hover-chip';
+    a.href = h;
+    if (!/^mailto:/i.test(h)) {
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+    }
+    a.textContent = label;
+    linksRow.appendChild(a);
+  }
+
+  const linksRow = document.createElement('div');
+  linksRow.className = 'graph-hover-links';
+
+  if (profileOpenHref.length > 0) {
+    hoverAddChip(linksRow, profileOpenHref, 'GitHub');
+  }
+  if (blogHref) {
+    hoverAddChip(linksRow, blogHref, 'Website');
+  }
+  if (emailRaw) {
+    hoverAddChip(linksRow, `mailto:${emailRaw}`, 'Email');
+  }
+  if (twitterRaw) {
+    const handle = twitterRaw.replace(/^@/, '');
+    hoverAddChip(linksRow, `https://twitter.com/${encodeURIComponent(handle)}`, 'X / Twitter');
+  }
+
+  const socialAccounts = p && Array.isArray(p.social_accounts) ? p.social_accounts : [];
+  for (let i = 0; i < socialAccounts.length; i++) {
+    const acct = socialAccounts[i];
+    const url = acct != null && typeof acct === 'object' ? hoverTrim(acct.url) : '';
+    if (!url || !/^https?:\/\//i.test(url)) continue;
+    const label = hoverSocialChipLabel(acct.provider);
+    hoverAddChip(linksRow, url, label);
+  }
+
+  const orgSrc = p && Array.isArray(p.organizations) ? p.organizations : [];
+  const orgLogins = [];
+  const seenOrg = new Set();
+  for (let i = 0; i < orgSrc.length; i++) {
+    const login = hoverExtractOrgLogin(orgSrc[i]);
+    if (!login || seenOrg.has(login.toLowerCase())) continue;
+    seenOrg.add(login.toLowerCase());
+    orgLogins.push(login);
+  }
+  for (let i = 0; i < orgLogins.length; i++) {
+    const lg = orgLogins[i];
+    hoverAddChip(
+      linksRow,
+      `https://github.com/${encodeURIComponent(lg)}`,
+      `@${lg}`,
+    );
+  }
+
+  if (linksRow.childNodes.length > 0) {
+    panel.appendChild(linksRow);
+  }
+
+  const dl = document.createElement('dl');
+  dl.className = 'graph-hover-dl';
+  let dlHasRows = false;
+
+  function considerProfileKey(k, val) {
+    if (HOVER_HIDDEN_PROFILE_KEYS.has(k)) return;
+    if (HOVER_KEYS_RENDERED_ABOVE.has(k)) return;
+    if (k === 'hireable' && val !== true) return;
+    if (typeof val === 'object' && val !== null) {
+      return;
+    }
+    if (!hoverScalarIsPresent(val)) return;
+    const formatted = formatHoverScalar(k, val);
+    if (!hoverTrim(formatted)) return;
+    hoverAppendDlRow(dl, humanizeHoverKey(k), formatted);
+    dlHasRows = true;
+  }
+
+  if (p) {
     for (const k of PROFILE_HOVER_PRIORITY) {
       if (!Object.prototype.hasOwnProperty.call(p, k)) continue;
-      const v = p[k];
-      if (v == null || v === '') continue;
-      lines.push(`${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`);
-      shown.add(k);
+      considerProfileKey(k, p[k]);
     }
-    for (const [k, v] of Object.entries(p)) {
-      if (shown.has(k)) continue;
-      if (v == null || v === '') continue;
-      if (typeof v === 'object') continue;
-      lines.push(`${k}: ${String(v)}`);
-    }
-    return lines.join('\n');
   }
-  const bits = [
-    d.login && `login: ${d.login}`,
-    d.name && `name: ${d.name}`,
-    d.company && `company: ${d.company}`,
-    d.location && `location: ${d.location}`,
-    d.bio && `bio: ${d.bio}`,
-    d.websiteUrl && `blog: ${d.websiteUrl}`
-  ].filter(Boolean);
-  return bits.length ? bits.join('\n') : String(d.login ?? d.id ?? '');
+
+  if (dlHasRows) panel.appendChild(dl);
+
+  el.appendChild(panel);
 }
 
 function nodeAvatarUrl(d) {
@@ -323,6 +563,16 @@ const NetworkGraph = ({
   });
   const [colorMaps, setColorMaps] = useState({});
   const [darkSurface, setDarkSurface] = useState(false);
+
+  useEffect(() => {
+    const hoverEl = hoverStatusRef.current;
+    if (!hoverEl) return;
+    const hide = () => {
+      hoverEl.style.display = 'none';
+    };
+    hoverEl.addEventListener('mouseleave', hide);
+    return () => hoverEl.removeEventListener('mouseleave', hide);
+  }, []);
 
 ///////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////
@@ -1370,6 +1620,7 @@ const NetworkGraph = ({
       node.on('dblclick', (event, d) => {
         event.preventDefault();
         event.stopPropagation();
+        if (interactivePhysicsRef.current) return;
         if (nodeClickTimer) {
           clearTimeout(nodeClickTimer);
           nodeClickTimer = null;
@@ -1384,28 +1635,28 @@ const NetworkGraph = ({
 
       const placeHoverNearPointer = (event) => {
         const el = hoverStatusRef.current;
-        const areaEl = visualizationAreaRef.current;
-        if (!el || !areaEl) return;
-        const rect = areaEl.getBoundingClientRect();
+        if (!el) return;
         const pad = 8;
         const gap = 14;
+        const vw = typeof window !== 'undefined' ? window.innerWidth : 0;
+        const vh = typeof window !== 'undefined' ? window.innerHeight : 0;
 
         el.style.display = 'block';
         const ew = el.offsetWidth;
         const eh = el.offsetHeight;
 
-        let left = event.clientX - rect.left + gap;
-        let top = event.clientY - rect.top + gap;
+        let left = event.clientX + gap;
+        let top = event.clientY + gap;
 
-        if (left + ew > rect.width - pad) {
-          left = event.clientX - rect.left - gap - ew;
+        if (left + ew > vw - pad) {
+          left = event.clientX - gap - ew;
         }
-        if (top + eh > rect.height - pad) {
-          top = event.clientY - rect.top - gap - eh;
+        if (top + eh > vh - pad) {
+          top = event.clientY - gap - eh;
         }
 
-        left = Math.max(pad, Math.min(left, rect.width - Math.max(ew, 40) - pad));
-        top = Math.max(pad, Math.min(top, rect.height - Math.max(eh, 24) - pad));
+        left = Math.max(pad, Math.min(left, vw - Math.max(ew, 40) - pad));
+        top = Math.max(pad, Math.min(top, vh - Math.max(eh, 24) - pad));
 
         el.style.left = `${left}px`;
         el.style.top = `${top}px`;
@@ -1415,7 +1666,7 @@ const NetworkGraph = ({
         .on('mouseover', (event, d) => {
           const el = hoverStatusRef.current;
           if (!el) return;
-          el.textContent = formatNodeHoverText(d);
+          renderNodeHoverPanel(el, d);
           el.style.display = 'block';
           placeHoverNearPointer(event);
         })
@@ -1424,12 +1675,16 @@ const NetworkGraph = ({
           if (!el || el.style.display === 'none') return;
           placeHoverNearPointer(event);
         })
-        .on('mouseout', () => {
+        .on('mouseout', (event) => {
           const el = hoverStatusRef.current;
-          if (el) el.style.display = 'none';
+          if (!el) return;
+          const next = event.relatedTarget;
+          if (next instanceof Node && el.contains(next)) return;
+          el.style.display = 'none';
         });
 
       // ── Long-press a node to crawl from it (hold-to-crawl) ───────────────
+      // Disabled while interactivePhysics is on (avoid expand while arranging).
       // Held without movement for LONG_PRESS_MS → call onNodeCrawl(d.login).
       // Movement past LONG_PRESS_MOVE_CANCEL_PX cancels (becomes a drag/pan).
       let longPressTimer = null;
@@ -1487,6 +1742,8 @@ const NetworkGraph = ({
         if (event.pointerType === 'mouse' && event.button !== 0) return;
         cancelLongPress();
         longPressFired = false;
+        if (interactivePhysicsRef.current) return;
+
         longPressStartX = event.clientX;
         longPressStartY = event.clientY;
         longPressActiveNode = d;
@@ -1511,6 +1768,11 @@ const NetworkGraph = ({
 
         longPressTimer = setTimeout(() => {
           longPressTimer = null;
+          if (interactivePhysicsRef.current) {
+            resetLongPressRing();
+            longPressActiveNode = null;
+            return;
+          }
           longPressFired = true;
           resetLongPressRing();
           const captured = longPressActiveNode;
@@ -1762,7 +2024,7 @@ const NetworkGraph = ({
 
         <div
           ref={hoverStatusRef}
-          className="graph-hover-status"
+          className={`graph-hover-status${darkSurface ? ' graph-hover-status--dark' : ' graph-hover-status--light'}`}
           role="status"
           aria-live="polite"
           style={{ display: 'none' }}
