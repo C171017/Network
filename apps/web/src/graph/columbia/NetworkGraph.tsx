@@ -468,8 +468,10 @@ const ZOOM_MAX_MOBILE = 1;
 
 // Multiplier applied to the computed "fit-to-viewport" initial zoom scale.
 // (1 keeps current behavior; increase >1 to zoom in more initially on mobile/desktop.)
-const INITIAL_ZOOM_MULTIPLIER_DESKTOP = 1.4;
+const INITIAL_ZOOM_MULTIPLIER_DESKTOP = 1.6;
 const INITIAL_ZOOM_MULTIPLIER_MOBILE = 1.0;
+const PAN_MARGIN_X = 30000;
+const PAN_MARGIN_Y = 1200;
 
 // Cluster mode: when zoomed below the viewport-specific threshold, large groups collapse
 // into a single organic "cloud" shape and smaller groups disappear entirely.
@@ -712,8 +714,8 @@ const NetworkGraph = ({
     const zoom = d3.zoom()
       .scaleExtent([ZOOM_MIN, ZOOM_MAX])
       .translateExtent([
-        [CIRCLE_CX - CANVAS_BACKDROP_RADIUS - 100, CIRCLE_CY - CANVAS_BACKDROP_RADIUS - 100],
-        [CIRCLE_CX + CANVAS_BACKDROP_RADIUS + 100, CIRCLE_CY + CANVAS_BACKDROP_RADIUS + 100]
+        [CIRCLE_CX - CANVAS_BACKDROP_RADIUS - PAN_MARGIN_X, CIRCLE_CY - CANVAS_BACKDROP_RADIUS - PAN_MARGIN_Y],
+        [CIRCLE_CX + CANVAS_BACKDROP_RADIUS + PAN_MARGIN_X, CIRCLE_CY + CANVAS_BACKDROP_RADIUS + PAN_MARGIN_Y]
       ])
       .on('zoom', (event) => {
         g.attr('transform', event.transform);
