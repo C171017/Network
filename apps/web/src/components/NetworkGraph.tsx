@@ -1,3 +1,4 @@
+import type { FC } from 'react'
 import ColumbiaNetworkGraph from '../graph/columbia/NetworkGraph'
 import type { VisualizationGraphData } from '../graph/columbia/graphAdapter'
 
@@ -15,6 +16,10 @@ type Props = {
   authenticatedSession?: boolean
 }
 
+/** Columbia graph is `@ts-nocheck`; assert props so `focusLoginRequest` isn’t inferred as only `null`. */
+type ColumbiaProps = Props & { colorBy: string }
+const ColumbiaView = ColumbiaNetworkGraph as FC<ColumbiaProps>
+
 export default function NetworkGraph({
   data,
   focusLoginRequest,
@@ -25,7 +30,7 @@ export default function NetworkGraph({
 }: Props) {
   if (!data?.nodes?.length) return null
   return (
-    <ColumbiaNetworkGraph
+    <ColumbiaView
       colorBy={DEFAULT_COLOR_BY}
       data={data}
       focusLoginRequest={focusLoginRequest}

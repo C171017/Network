@@ -19,7 +19,7 @@ const LOGO_PHYSICS_PRESS_MS = 380
 /** After physics (shake) is on, hold this long before the auth spin ramp can begin. */
 const LOGO_PHYSICS_DWELL_BEFORE_AUTH_MS = 1100
 /** Wait this long after a logo click before treating it as a single click (so double-click can mean fullscreen). */
-const LOGO_SINGLE_CLICK_WINDOW_MS = 10
+const LOGO_SINGLE_CLICK_WINDOW_MS = 180
 
 /** Easter egg: single-click the logo this many times (across signed-in/public) to play Pink Moon. */
 const LOGO_PINK_MOON_CLICK_THRESHOLD = 10

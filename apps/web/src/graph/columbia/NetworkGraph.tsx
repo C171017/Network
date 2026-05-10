@@ -733,6 +733,23 @@ function computeZoomMinBackgroundImageLongEdge(containerWidth, containerHeight, 
   return Math.min(baseline, zoomMaxCap);
 }
 
+/** Match zoom/viewBox math to the laid-out graph pane (not `innerHeight * 0.7`), so min zoom follows the long-edge rule on mobile. */
+function readGraphContainerSize(svgElement) {
+  const parent = svgElement?.parentElement;
+  if (parent && typeof parent.getBoundingClientRect === 'function') {
+    const r = parent.getBoundingClientRect();
+    const w = r.width;
+    const h = r.height;
+    if (w >= 1 && h >= 1) {
+      return { width: w, height: h };
+    }
+  }
+  return {
+    width: Math.max(1, parent?.clientWidth ?? 800),
+    height: Math.max(1, (typeof window !== 'undefined' ? window.innerHeight * 0.7 : 600) || 600),
+  };
+}
+
 function clampZoomTransformScale(t, kMin, kMax) {
   const k = Math.min(kMax, Math.max(kMin, t.k));
   if (k === t.k) return t;
@@ -1023,7 +1040,8 @@ const NetworkGraph = ({
     const handleResize = () => {
       if (svgRef.current?.parentElement) {
         const svg = d3.select(svgRef.current);
-        svg.attr('viewBox', `0 0 ${svgRef.current.parentElement.clientWidth} ${window.innerHeight * 0.7}`);
+        const { width: rw, height: rh } = readGraphContainerSize(svgRef.current);
+        svg.attr('viewBox', `0 0 ${rw} ${rh}`);
 
         if (zoomRef.current) {
           svg.select('g').attr('transform', d3.zoomTransform(svg.node()));
@@ -1091,8 +1109,7 @@ const NetworkGraph = ({
     let hoverPlacementRaf = null;
     let uiSurfaceThemeZoomRaf = null;
     try {
-      const containerWidth = svgRef.current.parentElement.clientWidth || 800;
-      const containerHeight = window.innerHeight * 0.7 || 600;
+      const { width: containerWidth, height: containerHeight } = readGraphContainerSize(svgRef.current);
 
       const width = containerWidth;
       const height = containerHeight;
@@ -2266,9 +2283,10 @@ const NetworkGraph = ({
         if (interactivePhysicsRef.current) {
           stopGroupMiniSimFully();
         }
-        // Desktop should always release pinning after drag. On touch we preserve
-        // the previous behavior (keep pinned) for direct-manipulation ergonomics.
-        if (activeDragNode && !('ontouchstart' in window) && !navigator.maxTouchPoints) {
+        // Desktop fine-pointer: clear pin after drag. WebKit exposes `ontouchstart` on
+        // macOS Safari even without a touchscreen, so never use that for "is touch".
+        // Match hover-card eligibility: `(hover: hover) and (pointer: fine)`.
+        if (activeDragNode && supportsHoverInfo()) {
           activeDragNode.fx = null;
           activeDragNode.fy = null;
         }
