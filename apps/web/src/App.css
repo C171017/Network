@@ -36,8 +36,8 @@ textarea {
 
 .app-logo-slot {
   position: fixed;
-  top: max(12px, env(safe-area-inset-top));
-  left: max(12px, env(safe-area-inset-left));
+  top: max(24px, env(safe-area-inset-top));
+  left: max(24px, env(safe-area-inset-left));
   z-index: 300;
 }
 
@@ -99,7 +99,7 @@ textarea {
 
 .app-logo {
   display: block;
-  height: clamp(28px, 5vw, 40px);
+  height: clamp(48px, 8.45vw, 68px);
   width: auto;
   user-select: none;
 }

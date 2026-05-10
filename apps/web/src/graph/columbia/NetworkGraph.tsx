@@ -1416,10 +1416,10 @@ const NetworkGraph = ({
           }
         }
 
-        // Upper-left app logo (`App.css` `.app-logo-anchor` + ~half rendered size).
-        const logoInset = 12;
-        const logoSx = logoInset + 36;
-        const logoSy = logoInset + 17;
+        // Upper-left app logo (`App.css` `.app-logo-slot` + ~half rendered size).
+        const logoInset = 24;
+        const logoSx = logoInset + 61;
+        const logoSy = logoInset + 29;
         const logoIsDark = logoPxIsDark(logoSx, logoSy);
         if (logoIsDark !== lastLogoUiIsDark) {
           lastLogoUiIsDark = logoIsDark;
