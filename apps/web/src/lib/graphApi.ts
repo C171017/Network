@@ -19,7 +19,8 @@ export type GraphDTO = {
     websiteUrl: string | null
     profileUrl: string
     isRoot: boolean
-    depth: number
+    /** Owner-relative shortest-hop distance from authenticated root (root=1). */
+    degree: number
     expanded: 0 | 1
     /** Full GitHub `GET /users/{login}` payload when stored from crawl */
     profile: Record<string, unknown> | null

@@ -256,7 +256,7 @@ function renderNodeHoverPanel(el, d) {
     titleEl.textContent = metaLine;
   } else {
     titleEl.classList.add('graph-hover-title-muted');
-    titleEl.textContent = bio ? 'Profile' : 'GitHub profile';
+    titleEl.textContent = 'Profile';
   }
   head.appendChild(titleEl);
 
@@ -275,12 +275,6 @@ function renderNodeHoverPanel(el, d) {
     bioEl.textContent = bio;
     panel.appendChild(bioEl);
   }
-
-  const rawProfileUrl = d.profileUrl != null ? hoverTrim(d.profileUrl) : '';
-  const profileOpenHref =
-    rawProfileUrl.length > 0
-      ? rawProfileUrl
-      : `https://github.com/${encodeURIComponent(String(d.login ?? ''))}`;
 
   const hrefDedupe = new Set();
   function hoverAddChip(linksRow, href, label) {
@@ -311,9 +305,6 @@ function renderNodeHoverPanel(el, d) {
   const linksRow = document.createElement('div');
   linksRow.className = 'graph-hover-links';
 
-  if (profileOpenHref.length > 0) {
-    hoverAddChip(linksRow, profileOpenHref, 'GitHub');
-  }
   if (blogHref) {
     hoverAddChip(linksRow, blogHref, 'Website');
   }
@@ -2528,7 +2519,7 @@ const NetworkGraph = ({
             setColorBy={setColorBy}
             nodes={data.nodes}
             darkSurface={darkSurface}
-            hideDepthOption={!authenticatedSession}
+            hideDegreeOption={!authenticatedSession}
           />
           <Legend colorBy={colorBy} colorMaps={colorMaps} darkSurface={darkSurface} />
         </div>

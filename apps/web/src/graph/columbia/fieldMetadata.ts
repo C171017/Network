@@ -1,5 +1,5 @@
 /** Fields allowed in “color by” for GitHub graph nodes (low-cardinality / useful only). */
-const COLORABLE_ORDER = ['depth', 'location'] as const
+const COLORABLE_ORDER = ['degree', 'location'] as const
 
 export const toLabel = (key: string): string =>
   String(key)

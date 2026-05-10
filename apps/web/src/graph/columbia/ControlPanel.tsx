@@ -7,7 +7,7 @@ type Props = {
   setColorBy: (v: string) => void
   nodes?: Array<Record<string, unknown>>
   darkSurface?: boolean
-  hideDepthOption?: boolean
+  hideDegreeOption?: boolean
 }
 
 export default function ControlPanel({
@@ -15,14 +15,14 @@ export default function ControlPanel({
   setColorBy,
   nodes = [],
   darkSurface = false,
-  hideDepthOption = false
+  hideDegreeOption = false
 }: Props) {
   const colorOptions = useMemo(() => {
     if (!nodes.length) return []
     return getColorableFieldKeys(nodes[0]!)
-      .filter((k) => !(hideDepthOption && k === 'depth'))
+      .filter((k) => !(hideDegreeOption && k === 'degree'))
       .map((k) => ({ value: k, label: toLabel(k) }))
-  }, [nodes, hideDepthOption])
+  }, [nodes, hideDegreeOption])
 
   useEffect(() => {
     if (!colorOptions.length) {

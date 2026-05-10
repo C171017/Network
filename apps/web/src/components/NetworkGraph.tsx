@@ -20,7 +20,7 @@ export default function NetworkGraph({
   interactivePhysics,
   authenticatedSession = false,
 }: Props) {
-  const [colorBy, setColorBy] = useState('depth')
+  const [colorBy, setColorBy] = useState('degree')
   if (!data?.nodes?.length) return null
   return (
     <ColumbiaNetworkGraph

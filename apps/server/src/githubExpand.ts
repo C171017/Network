@@ -64,8 +64,8 @@ export const DEFAULT_PROFILE_ENRICH_PER_SIDE = 12;
 export const DEFAULT_AUGMENTS_MAX_PAGES = 2;
 /** Default: org/social list endpoints only for the seed user (fewer API calls). */
 export const DEFAULT_PROFILE_AUGMENTS_MODE: GithubProfileAugmentsMode = "root";
-/** Expand nodes at depths 0 … maxHopDepth - 1; deepest discovered users sit at `maxHopDepth`. */
-export const DEFAULT_MAX_HOP_DEPTH = 3;
+/** Expand nodes at hop-degrees 1 … maxHopDepth - 1; deepest discovered users sit at `maxHopDepth`. */
+export const DEFAULT_MAX_HOP_DEPTH = 12;
 
 async function ghFetch<T>(token: string, path: string): Promise<T> {
   const res = await fetch(`${API}${path}`, {
@@ -279,7 +279,7 @@ async function collectNeighborsFromSide(
 function toNode(
   user: GithubPublicUser,
   isRoot: boolean,
-  depth: number,
+  degree: number,
   expanded: 0 | 1,
   augments?: { social_accounts: GithubSocialAccount[]; organizations: GithubPublicOrganization[] },
 ): NodeDTO {
@@ -295,7 +295,7 @@ function toNode(
     websiteUrl: user.blog ?? null,
     profileUrl: githubProfilePageUrl(user.login, user.html_url),
     isRoot,
-    depth,
+    degree,
     expanded,
     profile,
   };
@@ -304,14 +304,14 @@ function toNode(
 function toNodeRow(
   n: NodeDTO,
   user: GithubPublicUser,
-  depth: number,
+  degree: number,
   expanded: 0 | 1,
 ): Omit<NodeRowInput, "ownerUserId"> {
   const s = crawlScalarsFromGithubUser(user);
   return {
     githubId: n.githubId,
     login: n.login,
-    depth,
+    degree,
     expanded,
     avatarUrl: n.avatarUrl,
     name: n.name,
@@ -345,7 +345,7 @@ async function mergeNeighborFromGithub(
   token: string,
   raw: GithubPublicUser,
   sideEnriched: Map<number, GithubPublicUser>,
-  hopDepth: number,
+  candidateDepth: number,
   nodeById: Map<number, NodeDTO>,
   opts: {
     rootLoginTrimmed: string;
@@ -360,11 +360,11 @@ async function mergeNeighborFromGithub(
     ? await fetchProfileAugments(token, full.login, opts.augmentsMaxPages)
     : EMPTY_AUGMENTS;
   const prev = nodeById.get(full.id);
-  const depth = prev ? Math.min(prev.depth, hopDepth + 1) : hopDepth + 1;
+  const degree = prev ? Math.min(prev.degree, candidateDepth) : candidateDepth;
   const expanded: 0 | 1 = prev?.expanded ?? 0;
   const isRoot = prev?.isRoot ?? false;
   return {
-    dto: toNode(full, isRoot, depth, expanded, augments),
+    dto: toNode(full, isRoot, degree, expanded, augments),
     fullUser: full,
     profileAugments: augments,
   };
@@ -375,7 +375,7 @@ async function mergeNeighborFromGithub(
  * and up to `branchFollowers` followers (incoming). Neighbors are chosen with tiered rules
  * (location+company+avatar → location → anyone) over paginated lists; see `firstBudgetPages` /
  * `secondBudgetPages`. Edges stay canonical: `source → target` means source follows target.
- * Depth is hop count from the root in this mixed graph. All nodes and edges are written to SQLite
+ * Degree is shortest-hop distance from the owner root in this mixed graph. All nodes and edges are written to SQLite
  * (`nodes`, `edges`) for accumulation across requests.
  */
 export async function expandFollowingDepthGraph(params: {
@@ -426,8 +426,8 @@ export async function expandFollowingDepthGraph(params: {
   const rootAugments = shouldFetchAugmentsForLogin(rootUser.login, normalizedRoot, profileAugmentsMode)
     ? await fetchProfileAugments(token, rootUser.login, augmentsMaxPages)
     : EMPTY_AUGMENTS;
-  const rootNode = toNode(rootUser, true, 0, 0, rootAugments);
-  persistNode(db, { ...toNodeRow(rootNode, rootUser, 0, 0), ownerUserId }, {
+  const rootNode = toNode(rootUser, true, 1, 0, rootAugments);
+  persistNode(db, { ...toNodeRow(rootNode, rootUser, 1, 0), ownerUserId }, {
     socialAccounts: rootAugments.social_accounts,
     organizations: rootAugments.organizations,
   });
@@ -446,9 +446,10 @@ export async function expandFollowingDepthGraph(params: {
   const edges: EdgeDTO[] = [];
   const edgeKeySeen = new Set<string>();
 
-  const queue: Array<{ id: number; login: string; depth: number }> = [
-    { id: rootNode.githubId, login: rootNode.login, depth: 0 },
+  const queue: Array<{ id: number; login: string; degree: number }> = [
+    { id: rootNode.githubId, login: rootNode.login, degree: 1 },
   ];
+  const bestDepthById = new Map<number, number>([[rootNode.githubId, 1]]);
   const expandedIds = new Set<number>();
 
   const neighborAugmentOpts = {
@@ -472,7 +473,10 @@ export async function expandFollowingDepthGraph(params: {
 
   while (queue.length > 0) {
     const u = queue.shift()!;
-    if (u.depth >= maxHopDepth) continue;
+    const bestKnownDepth = bestDepthById.get(u.id);
+    if (bestKnownDepth === undefined) continue;
+    if (u.degree !== bestKnownDepth) continue;
+    if (bestKnownDepth >= maxHopDepth) continue;
     if (expandedIds.has(u.id)) continue;
     expandedIds.add(u.id);
 
@@ -490,9 +494,9 @@ export async function expandFollowingDepthGraph(params: {
       warmCache.set(u.id, { user: freshSelf, augments: expandAugments });
     }
     const isRootUser = u.id === rootNode.githubId;
-    const parentDto = toNode(freshSelf, isRootUser, u.depth, 1, expandAugments);
+    const parentDto = toNode(freshSelf, isRootUser, bestKnownDepth, 1, expandAugments);
     nodeById.set(u.id, parentDto);
-    persistNode(db, { ...toNodeRow(parentDto, freshSelf, parentDto.depth, 1), ownerUserId }, {
+    persistNode(db, { ...toNodeRow(parentDto, freshSelf, parentDto.degree, 1), ownerUserId }, {
       socialAccounts: expandAugments.social_accounts,
       organizations: expandAugments.organizations,
     });
@@ -528,20 +532,26 @@ export async function expandFollowingDepthGraph(params: {
         token,
         raw,
         followingPick.enriched,
-        u.depth,
+        bestKnownDepth + 1,
         nodeById,
         neighborAugmentOpts,
       );
+      const prevDepth = bestDepthById.get(child.dto.githubId);
+      if (prevDepth === undefined || child.dto.degree < prevDepth) {
+        bestDepthById.set(child.dto.githubId, child.dto.degree);
+      }
       warmCache.set(child.dto.githubId, { user: child.fullUser, augments: child.profileAugments });
       nodeById.set(child.dto.githubId, child.dto);
-      persistNode(db, { ...toNodeRow(child.dto, child.fullUser, child.dto.depth, child.dto.expanded), ownerUserId }, {
+      persistNode(db, { ...toNodeRow(child.dto, child.fullUser, child.dto.degree, child.dto.expanded), ownerUserId }, {
         socialAccounts: child.profileAugments.social_accounts,
         organizations: child.profileAugments.organizations,
       });
       onProgress?.({ type: "node", node: child.dto });
       addFollowsEdge(u.id, child.dto.githubId);
       followingReturned += 1;
-      queue.push({ id: child.dto.githubId, login: child.dto.login, depth: u.depth + 1 });
+      if (child.dto.degree <= maxHopDepth) {
+        queue.push({ id: child.dto.githubId, login: child.dto.login, degree: child.dto.degree });
+      }
     }
 
     for (const raw of followers) {
@@ -550,14 +560,18 @@ export async function expandFollowingDepthGraph(params: {
         token,
         raw,
         followersPick.enriched,
-        u.depth,
+        bestKnownDepth + 1,
         nodeById,
         neighborAugmentOpts,
       );
+      const prevDepth = bestDepthById.get(follower.dto.githubId);
+      if (prevDepth === undefined || follower.dto.degree < prevDepth) {
+        bestDepthById.set(follower.dto.githubId, follower.dto.degree);
+      }
       warmCache.set(follower.dto.githubId, { user: follower.fullUser, augments: follower.profileAugments });
       nodeById.set(follower.dto.githubId, follower.dto);
       persistNode(db, {
-        ...toNodeRow(follower.dto, follower.fullUser, follower.dto.depth, follower.dto.expanded),
+        ...toNodeRow(follower.dto, follower.fullUser, follower.dto.degree, follower.dto.expanded),
         ownerUserId,
       }, {
         socialAccounts: follower.profileAugments.social_accounts,
@@ -566,7 +580,9 @@ export async function expandFollowingDepthGraph(params: {
       onProgress?.({ type: "node", node: follower.dto });
       addFollowsEdge(follower.dto.githubId, u.id);
       followersReturned += 1;
-      queue.push({ id: follower.dto.githubId, login: follower.dto.login, depth: u.depth + 1 });
+      if (follower.dto.degree <= maxHopDepth) {
+        queue.push({ id: follower.dto.githubId, login: follower.dto.login, degree: follower.dto.degree });
+      }
     }
   }
 

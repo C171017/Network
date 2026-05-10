@@ -56,7 +56,8 @@ function parseProfileJson(raw: string | null): Record<string, unknown> | null {
   }
 }
 
-function rowToNode(row: NodeRow, isRoot: boolean): NodeDTO {
+function rowToNode(row: NodeRow, isRoot: boolean, degreeOverride?: number): NodeDTO {
+  const degree = Math.max(1, degreeOverride ?? row.depth);
   return {
     githubId: row.github_id,
     login: row.login,
@@ -68,7 +69,7 @@ function rowToNode(row: NodeRow, isRoot: boolean): NodeDTO {
     websiteUrl: row.blog,
     profileUrl: githubProfilePageUrl(row.login, row.html_url),
     isRoot,
-    depth: row.depth,
+    degree,
     expanded: row.expanded ? 1 : 0,
     profile: parseProfileJson(row.profile_json),
   };
@@ -208,7 +209,7 @@ export function readReachableGraph(db: Database.Database, ownerUserId: string, r
     return emptyGraph(rootLogin.trim());
   }
 
-  const visited = new Set<number>([rootRow.github_id]);
+  const degreeById = new Map<number, number>([[rootRow.github_id, 1]]);
   const queue = [rootRow.github_id];
   const followStmt = db.prepare(
     `SELECT target_id FROM edges WHERE owner_user_id = ? AND kind = 'follows' AND source_id = ?`,
@@ -216,15 +217,17 @@ export function readReachableGraph(db: Database.Database, ownerUserId: string, r
 
   while (queue.length > 0) {
     const u = queue.shift()!;
+    const degreeU = degreeById.get(u);
+    if (degreeU === undefined) continue;
     const targets = followStmt.all(ownerUserId, u) as Array<{ target_id: number }>;
     for (const { target_id: t } of targets) {
-      if (visited.has(t)) continue;
-      visited.add(t);
+      if (degreeById.has(t)) continue;
+      degreeById.set(t, degreeU + 1);
       queue.push(t);
     }
   }
 
-  const ids = sampleIdsKeepingRoot([...visited], rootRow.github_id, maxNodes);
+  const ids = sampleIdsKeepingRoot([...degreeById.keys()], rootRow.github_id, maxNodes);
   ensureNodeSubsetTemp(db);
   insertNodeSubsetIds(db, ids);
 
@@ -249,7 +252,9 @@ export function readReachableGraph(db: Database.Database, ownerUserId: string, r
       )
       .all(ownerUserId, maxEdges ?? -1) as Array<{ source_id: number; target_id: number }>;
 
-    const nodes: NodeDTO[] = nodeRows.map((r) => rowToNode(r, r.github_id === rootRow.github_id));
+    const nodes: NodeDTO[] = nodeRows.map((r) =>
+      rowToNode(r, r.github_id === rootRow.github_id, degreeById.get(r.github_id) ?? r.depth),
+    );
     const edges: EdgeDTO[] = edgeRows.map((e) => ({
       sourceGithubId: e.source_id,
       targetGithubId: e.target_id,

@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 
 const PUBLIC_GRAPH_OWNER_ID = "public";
+const LEGACY_OWNER_PURGE_FLAG = "legacy_owner_depth_purged_v1";
+const OWNER_DEGREE_BASELINE_FLAG = "owner_degree_baseline_v1";
 
 function tableColumns(db: Database.Database, tableName: string): Set<string> {
   const rows = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
@@ -199,6 +201,73 @@ function ensureAugmentTables(db: Database.Database): void {
   `);
 }
 
+/**
+ * One-time cleanup for legacy owner-scoped data that used pre-migration depth semantics.
+ * Public demo graph rows are preserved.
+ */
+function purgeLegacyOwnerDataOnce(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS app_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `);
+  const alreadyPurged = db
+    .prepare(`SELECT value FROM app_meta WHERE key = ? LIMIT 1`)
+    .get(LEGACY_OWNER_PURGE_FLAG) as { value: string } | undefined;
+  if (alreadyPurged?.value === "1") return;
+
+  db.exec("BEGIN");
+  try {
+    db.prepare(`DELETE FROM edges WHERE owner_user_id <> ?`).run(PUBLIC_GRAPH_OWNER_ID);
+    db.prepare(`DELETE FROM nodes WHERE owner_user_id <> ?`).run(PUBLIC_GRAPH_OWNER_ID);
+    db.prepare(`DELETE FROM node_social_accounts WHERE owner_user_id <> ?`).run(PUBLIC_GRAPH_OWNER_ID);
+    db.prepare(`DELETE FROM node_org_memberships WHERE owner_user_id <> ?`).run(PUBLIC_GRAPH_OWNER_ID);
+    db.prepare(`INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, '1')`).run(LEGACY_OWNER_PURGE_FLAG);
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+}
+
+/**
+ * One-time migration to 1-based owner-relative degree for owner-scoped rows.
+ * If an owner still has any depth=0 rows from legacy 0-based writes, shift all
+ * rows for that owner by +1 so relative ordering remains intact.
+ */
+function normalizeOwnerDegreeBaselineOnce(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS app_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `);
+  const alreadyNormalized = db
+    .prepare(`SELECT value FROM app_meta WHERE key = ? LIMIT 1`)
+    .get(OWNER_DEGREE_BASELINE_FLAG) as { value: string } | undefined;
+  if (alreadyNormalized?.value === "1") return;
+
+  db.exec("BEGIN");
+  try {
+    db.prepare(
+      `UPDATE nodes
+       SET depth = depth + 1
+       WHERE owner_user_id IN (
+         SELECT owner_user_id
+         FROM nodes
+         WHERE owner_user_id <> ? AND depth = 0
+         GROUP BY owner_user_id
+       )`,
+    ).run(PUBLIC_GRAPH_OWNER_ID);
+    db.prepare(`INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, '1')`).run(OWNER_DEGREE_BASELINE_FLAG);
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+}
+
 function replaceNodeSocialAccounts(
   db: Database.Database,
   ownerUserId: string,
@@ -324,6 +393,8 @@ export function openGraphDatabase(dbPath: string): Database.Database {
   ensureNodeColumns(db);
   ensureOwnerScopedSchema(db);
   ensureAugmentTables(db);
+  purgeLegacyOwnerDataOnce(db);
+  normalizeOwnerDegreeBaselineOnce(db);
 
   return db;
 }
@@ -332,7 +403,7 @@ export type NodeRowInput = {
   ownerUserId: string;
   githubId: number;
   login: string;
-  depth: number;
+  degree: number;
   expanded: 0 | 1;
   avatarUrl: string;
   name: string | null;
@@ -403,7 +474,7 @@ export function persistNode(
     owner_user_id: row.ownerUserId,
     github_id: row.githubId,
     login: row.login,
-    depth: row.depth,
+    depth: row.degree,
     expanded: row.expanded,
     avatar_url: row.avatarUrl,
     name: row.name,

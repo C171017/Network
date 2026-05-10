@@ -23,7 +23,7 @@ export function graphDtoToVisualizationData(dto: GraphDTO): VisualizationGraphDa
     location: n.location,
     profileUrl: githubProfileUrl(n.login, n.profileUrl),
     websiteUrl: n.websiteUrl ?? null,
-    depth: 'depth' in n && typeof n.depth === 'number' ? n.depth : 0,
+    degree: 'degree' in n && typeof n.degree === 'number' ? n.degree : 1,
     expanded: 'expanded' in n && (n.expanded === 0 || n.expanded === 1) ? n.expanded : 0,
     isRoot: n.isRoot,
     avatarUrl: n.avatarUrl,

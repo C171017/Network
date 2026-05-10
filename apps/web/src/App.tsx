@@ -62,7 +62,7 @@ function buildSeedGraphDto(login: string): GraphDTO {
         websiteUrl: null,
         profileUrl,
         isRoot: true,
-        depth: 0,
+        degree: 1,
         expanded: 0,
         profile: null,
       },

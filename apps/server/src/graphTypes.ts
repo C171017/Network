@@ -11,8 +11,8 @@ export type NodeDTO = {
   websiteUrl: string | null;
   profileUrl: string;
   isRoot: boolean;
-  /** Graph hop depth from crawl or SQLite row (legend / color-by). */
-  depth: number;
+  /** Owner-relative shortest-hop distance from authenticated root (root=1). */
+  degree: number;
   /** 1 if this node had its following list fetched during crawl. */
   expanded: 0 | 1;
   /** Full `GET /users/{login}` payload when crawled (also stored as JSON in SQLite). */
