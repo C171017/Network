@@ -23,8 +23,10 @@ export type NeighborPick = {
 export type StochasticCrawlConfig = {
   token: string;
   seedLogin: string;
-  /** Random neighbors sampled per expanded node (you chose 6; range 4–8 supported). */
-  branchSample: number;
+  /** Upper bound on random followers (incoming) sampled per expanded node. */
+  branchFollowers: number;
+  /** Upper bound on random following (outgoing) sampled per expanded node. */
+  branchFollowing: number;
   /** How many hops from seed to expand (seed depth 0 expands if maxDepth > 0). */
   maxDepth: number;
   /** Max GitHub list pages per side (followers / following) when building the pool to sample from. */

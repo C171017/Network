@@ -18,6 +18,21 @@ function envInt(name: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/** Per-side caps; legacy `BRANCH_SAMPLE` sets both when the per-side vars are unset. */
+function branchCapsFromEnv(): { branchFollowers: number; branchFollowing: number } {
+  const legacy = process.env.BRANCH_SAMPLE;
+  const hasPerSide =
+    process.env.BRANCH_FOLLOWERS !== undefined || process.env.BRANCH_FOLLOWING !== undefined;
+  if (legacy != null && !hasPerSide) {
+    const n = envInt("BRANCH_SAMPLE", 3);
+    return { branchFollowers: n, branchFollowing: n };
+  }
+  return {
+    branchFollowers: envInt("BRANCH_FOLLOWERS", 3),
+    branchFollowing: envInt("BRANCH_FOLLOWING", 3),
+  };
+}
+
 async function main() {
   const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
   const seedLogin = process.env.SEED_LOGIN;
@@ -31,8 +46,8 @@ async function main() {
   }
 
   const dbPath = process.env.DB_PATH ?? "./data/network.db";
-  const branchSample = envInt("BRANCH_SAMPLE", 6);
-  const maxDepth = envInt("MAX_DEPTH", 5);
+  const { branchFollowers, branchFollowing } = branchCapsFromEnv();
+  const maxDepth = envInt("MAX_DEPTH", 3);
   const maxPagesPerSide = envInt("MAX_PAGES_PER_SIDE", 3);
   const maxExpansions = envInt("MAX_EXPANSIONS", 200);
   const reset = process.env.RESET_DB === "1" || process.env.RESET_DB === "true";
@@ -42,7 +57,8 @@ async function main() {
       {
         seedLogin,
         dbPath,
-        branchSample,
+        branchFollowers,
+        branchFollowing,
         maxDepth,
         maxPagesPerSide,
         maxExpansions,
@@ -56,7 +72,8 @@ async function main() {
   const stats = await runStochasticCrawl({
     token,
     seedLogin,
-    branchSample,
+    branchFollowers,
+    branchFollowing,
     maxDepth,
     maxPagesPerSide,
     maxExpansions,

@@ -5,8 +5,11 @@ import { persistFollowsEdge, persistNode, type NodeRowInput } from "./graphStore
 
 const API = "https://api.github.com";
 
-/** First `per_page` page per side (following / followers); GitHub order ≈ recent first. */
-export const DEFAULT_FOLLOWING_BRANCH = 5;
+/** Upper bound on random followers / following sampled per expanded node (after shuffling a list page). */
+export const DEFAULT_FOLLOWING_BRANCH = 3;
+
+/** GitHub allows up to 100; we pull one page then randomly take up to the branch caps. */
+const FOLLOW_LIST_POOL = 100;
 /** Expand nodes at depths 0 … maxHopDepth - 1; deepest discovered users sit at `maxHopDepth`. */
 export const DEFAULT_MAX_HOP_DEPTH = 3;
 
@@ -75,25 +78,31 @@ async function ghFetch<T>(token: string, path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function listFollowingFirstN(token: string, login: string, n: number): Promise<GithubUserApi[]> {
-  const chunk = await ghFetch<GithubUserApi[]>(
-    token,
-    `/users/${encodeURIComponent(login)}/following?per_page=${n}&page=1`,
-  );
-  return chunk.slice(0, n);
+function shuffleInPlace<T>(arr: T[]): void {
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
 }
 
-async function listFollowersFirstN(token: string, login: string, n: number): Promise<GithubUserApi[]> {
-  const chunk = await ghFetch<GithubUserApi[]>(
+async function listFollowingPool(token: string, login: string): Promise<GithubUserApi[]> {
+  return ghFetch<GithubUserApi[]>(
     token,
-    `/users/${encodeURIComponent(login)}/followers?per_page=${n}&page=1`,
+    `/users/${encodeURIComponent(login)}/following?per_page=${FOLLOW_LIST_POOL}&page=1`,
   );
-  return chunk.slice(0, n);
+}
+
+async function listFollowersPool(token: string, login: string): Promise<GithubUserApi[]> {
+  return ghFetch<GithubUserApi[]>(
+    token,
+    `/users/${encodeURIComponent(login)}/followers?per_page=${FOLLOW_LIST_POOL}&page=1`,
+  );
 }
 
 /**
- * BFS using **both** directions per user: up to `branchFollowing` accounts they follow (outgoing)
- * and up to `branchFollowers` followers (incoming). Edges stay canonical: `source → target` means
+ * BFS using **both** directions per user: up to `branchFollowing` random accounts they follow (outgoing)
+ * and up to `branchFollowers` random followers (incoming), drawn from the first list page then shuffled.
+ * Edges stay canonical: `source → target` means
  * source follows target. Depth is hop count from the root in this mixed graph. All nodes and
  * edges are written to SQLite (`nodes`, `edges`) for accumulation across requests.
  */
@@ -144,10 +153,16 @@ export async function expandFollowingDepthGraph(params: {
     if (expandedIds.has(u.id)) continue;
     expandedIds.add(u.id);
 
-    const [following, followers] = await Promise.all([
-      listFollowingFirstN(token, u.login, branchFollowing),
-      listFollowersFirstN(token, u.login, branchFollowers),
+    const [followingPool, followersPool] = await Promise.all([
+      listFollowingPool(token, u.login),
+      listFollowersPool(token, u.login),
     ]);
+    const followingShuffled = [...followingPool];
+    const followersShuffled = [...followersPool];
+    shuffleInPlace(followingShuffled);
+    shuffleInPlace(followersShuffled);
+    const following = followingShuffled.slice(0, Math.min(branchFollowing, followingShuffled.length));
+    const followers = followersShuffled.slice(0, Math.min(branchFollowers, followersShuffled.length));
 
     const parentDto = nodeById.get(u.id)!;
     persistNode(db, toNodeRow(parentDto, u.depth, 1));

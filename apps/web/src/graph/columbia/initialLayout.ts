@@ -19,6 +19,54 @@ const BASE_R = 200
 const PX_PER_NODE = 25
 const PAD = 700
 
+function buildAdjacency(data: VisualizationGraphData): Map<number, number[]> {
+  const adj = new Map<number, number[]>()
+  for (const n of data.nodes) adj.set(n.id, [])
+  for (const l of data.links) {
+    adj.get(l.source)?.push(l.target)
+    adj.get(l.target)?.push(l.source)
+  }
+  return adj
+}
+
+function bfsDepthsFromRoot(
+  ids: ReadonlySet<number>,
+  adj: Map<number, number[]>,
+  rootId: number
+): Map<number, number> {
+  const depth = new Map<number, number>()
+  const q: number[] = [rootId]
+  depth.set(rootId, 0)
+  for (let qi = 0; qi < q.length; qi++) {
+    const u = q[qi]!
+    const du = depth.get(u)!
+    const neighbors = adj.get(u) ?? []
+    for (let i = 0; i < neighbors.length; i++) {
+      const v = neighbors[i]!
+      if (!ids.has(v) || depth.has(v)) continue
+      depth.set(v, du + 1)
+      q.push(v)
+    }
+  }
+  return depth
+}
+
+function pickComponentRoot(nodes: LayoutNode[], ids: Set<number>, adj: Map<number, number[]>): number {
+  const roots = nodes.filter((n) => n.isRoot === true)
+  if (roots.length === 1) return roots[0]!.id
+
+  let best = nodes[0]!
+  let bestDeg = -1
+  for (const n of nodes) {
+    const deg = (adj.get(n.id) ?? []).filter((v) => ids.has(v)).length
+    if (deg > bestDeg || (deg === bestDeg && n.id < best.id)) {
+      bestDeg = deg
+      best = n
+    }
+  }
+  return best.id
+}
+
 function clampToMovableDisk(x: number, y: number): { x: number; y: number } {
   const movableLimit = Math.max(0, CANVAS_WHITE_OUTER_RADIUS - NODE_RADIUS - 10)
   const dx = x - CIRCLE_CX
@@ -30,8 +78,10 @@ function clampToMovableDisk(x: number, y: number): { x: number; y: number } {
 }
 
 /**
- * Seeds node positions (group centers + per-node disk placement), matching the
- * former Columbia D3 graph’s pre-simulation layout.
+ * Seeds node positions: group centers use the golden-disk packing as before;
+ * within each connected component, nodes are placed on expanding BFS rings
+ * from a root (marked `isRoot`, else max degree) so edges tend to run outward
+ * instead of crossing as random disk fills do.
  */
 export function computeInitialPositions(
   data: VisualizationGraphData,
@@ -121,48 +171,59 @@ export function computeInitialPositions(
     nodesByGroupSeed[groupMap.get(n.id)!]!.push(n)
   })
 
+  const fullAdj = buildAdjacency(data)
+
   for (let gi = 0; gi < groupCount; gi++) {
     const c = centres[gi] || { x: CIRCLE_CX, y: CIRCLE_CY }
     const groupNodes = nodesByGroupSeed[gi]!
-    const seeded: { x: number; y: number }[] = []
     const radialLimit = Math.max(groupR[gi]! - 36, 28)
-    const minSepBase = Math.min(92, Math.max(42, NODE_RADIUS * 1.7))
 
-    groupNodes.forEach((n, idx) => {
-      let placed: { x: number; y: number } | null = null
-      for (let attempt = 0; attempt < 60; attempt++) {
-        const θ = rng() * 2 * Math.PI
-        const r = Math.sqrt(rng()) * radialLimit
-        const cand = {
-          x: c.x + r * Math.cos(θ),
-          y: c.y + r * Math.sin(θ),
-        }
-        const clamped = clampToMovableDisk(cand.x, cand.y)
-        const minSep = Math.max(20, minSepBase - attempt * 0.85)
-        const isFarEnough = seeded.every((p) => {
-          const dx = p.x - clamped.x
-          const dy = p.y - clamped.y
-          return dx * dx + dy * dy >= minSep * minSep
-        })
-        if (isFarEnough) {
-          placed = clamped
-          break
-        }
+    const idSet = new Set(groupNodes.map((n) => n.id))
+    const rootId = pickComponentRoot(groupNodes, idSet, fullAdj)
+    const depthMap = bfsDepthsFromRoot(idSet, fullAdj, rootId)
+
+    let maxD = 0
+    for (const n of groupNodes) {
+      if (!depthMap.has(n.id)) depthMap.set(n.id, 0)
+      maxD = Math.max(maxD, depthMap.get(n.id)!)
+    }
+
+    const byDepth = new Map<number, LayoutNode[]>()
+    for (const n of groupNodes) {
+      const d = depthMap.get(n.id) ?? 0
+      let arr = byDepth.get(d)
+      if (!arr) {
+        arr = []
+        byDepth.set(d, arr)
       }
+      arr.push(n)
+    }
+    byDepth.forEach((arr) => arr.sort((a, b) => a.id - b.id))
 
-      if (!placed) {
-        const fallbackTheta = (idx + 1) * golden
-        const fallbackR = Math.sqrt((idx + 1) / (groupNodes.length + 1)) * radialLimit
-        placed = clampToMovableDisk(
-          c.x + fallbackR * Math.cos(fallbackTheta),
-          c.y + fallbackR * Math.sin(fallbackTheta)
-        )
+    const depthSpan = Math.max(1, maxD + 1)
+    const edgeInset = 0.07
+
+    for (let d = 0; d <= maxD; d++) {
+      const layer = byDepth.get(d)
+      if (!layer?.length) continue
+
+      const t0 = d / depthSpan
+      const t1 = (d + 1) / depthSpan
+      const rInner = radialLimit * (edgeInset + (1 - 2 * edgeInset) * t0)
+      const rOuter = radialLimit * (edgeInset + (1 - 2 * edgeInset) * t1)
+      const layerPhase = d * golden + gi * 0.73
+      const m = layer.length
+
+      for (let j = 0; j < m; j++) {
+        const n = layer[j]!
+        const u = m === 1 ? 0.5 : (j + 0.5) / m
+        const r = rInner + (rOuter - rInner) * Math.sqrt(u)
+        const theta = layerPhase + (2 * Math.PI * j) / m + (rng() - 0.5) * 0.04
+        const cand = clampToMovableDisk(c.x + r * Math.cos(theta), c.y + r * Math.sin(theta))
+        n.x = cand.x
+        n.y = cand.y
       }
-
-      n.x = placed.x
-      n.y = placed.y
-      seeded.push(placed)
-    })
+    }
   }
 
   nodes.forEach((n) => {

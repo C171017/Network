@@ -28,8 +28,8 @@ Create the folder once: `mkdir -p data`.
 - **Expanded profile** for a user we already stored: still **upserts** on expand so slim rows can become full profiles; re-running may **refresh** fields for people we expand again (API truth). If you want a strict “never touch existing rows” policy, say so and we can tighten that.
 - To **wipe** and start over for one demo only, set `RESET_DB=1` for that single run.
 
-- From each expanded user, pull **first-degree** connections (followers **and** following), build a pool from the first `MAX_PAGES_PER_SIDE` pages on each side, then **randomly sample `BRANCH_SAMPLE` (default 6)** neighbors.
-- Repeat up to **`MAX_DEPTH` (default 5)** layers: expand every node whose `depth` is `0 … maxDepth - 1`.
+- From each expanded user, pull **first-degree** connections (followers **and** following), up to the first `MAX_PAGES_PER_SIDE` pages per side, then **independently shuffle each side** and take up to **`BRANCH_FOLLOWERS` / `BRANCH_FOLLOWING` (default 3 each)** random users per side (fewer if the list is short; someone in both samples is one `mutual` neighbor).
+- Repeat up to **`MAX_DEPTH` (default 3)** layers: expand every node whose `depth` is `0 … maxDepth - 1`.
 - Persist nodes + directed `follows` edges to **SQLite** (WAL) for local pitch seeding or future backend jobs.
 
 ## Why this exists
@@ -61,8 +61,10 @@ Environment variables:
 | `SEED_LOGIN` | (required) | Starting GitHub username |
 | `GITHUB_TOKEN` or `GH_TOKEN` | (required) | Token for `api.github.com` |
 | `DB_PATH` | `./data/network.db` | SQLite output path |
-| `BRANCH_SAMPLE` | `6` | Random neighbors per expansion (your 4–8 range; 6 now) |
-| `MAX_DEPTH` | `5` | Expand nodes at depths `0 … maxDepth-1` (5 waves with default 5) |
+| `BRANCH_FOLLOWERS` | `3` | Max random followers (incoming) per expansion |
+| `BRANCH_FOLLOWING` | `3` | Max random following (outgoing) per expansion |
+| `BRANCH_SAMPLE` | — | Legacy: if set and neither per-side var is set, applies the same cap to **both** sides |
+| `MAX_DEPTH` | `3` | Expand nodes at depths `0 … maxDepth-1` |
 | `MAX_PAGES_PER_SIDE` | `3` | Max list pages per side when pooling first-degree (300 users max per side) |
 | `MAX_EXPANSIONS` | `200` | Safety cap on distinct expansions (API budget) |
 | `RESET_DB` | unset | Set to `1` or `true` to **truncate** `nodes`/`edges` before this run (accurate counts) |
@@ -75,8 +77,9 @@ import { runStochasticCrawl } from "@network/crawler";
 await runStochasticCrawl({
   token: process.env.GITHUB_TOKEN!,
   seedLogin: "octocat",
-  branchSample: 6,
-  maxDepth: 5,
+  branchFollowers: 3,
+  branchFollowing: 3,
+  maxDepth: 3,
   maxPagesPerSide: 3,
   maxExpansions: 200,
   dbPath: "./data/network.db",
@@ -86,5 +89,5 @@ await runStochasticCrawl({
 ## Honest limitations
 
 - **Sampling bias:** neighbors are drawn from **early API pages** unless you increase `MAX_PAGES_PER_SIDE` (more requests, slower).
-- **Rate limits:** large `maxDepth` / `branchSample` can exhaust quota; the client throws `GithubRateLimitError` with optional `retry-after`.
+- **Rate limits:** large `maxDepth` / branch caps can exhaust quota; the client throws `GithubRateLimitError` with optional `retry-after`.
 - **Not scraping HTML:** this uses the official JSON API only.

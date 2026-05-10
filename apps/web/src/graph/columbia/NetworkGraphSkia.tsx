@@ -1,5 +1,5 @@
 import { Fragment, useMemo } from 'react'
-import { Canvas, Circle, Group, Line, Path, RadialGradient, Rect, Skia, vec } from '@shopify/react-native-skia'
+import { Canvas, Circle, Group, Path, RadialGradient, Rect, Skia, vec } from '@shopify/react-native-skia'
 
 /** Skia `Canvas` + react-native-web typings are incomplete in strict TS. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -14,7 +14,12 @@ import {
   CIRCLE_RADIUS,
   NODE_RADIUS,
 } from './graphConstants'
-import { arrowSegment, linkSegment } from './geometry'
+import {
+  computeLinkBendOffsets,
+  linkChordGeometry,
+  linkQuadControl,
+  quadBezierPointAndTangent,
+} from './geometry'
 import type { WorldTransform } from '../skia/viewTransform'
 import type { LayoutNode } from './initialLayout'
 
@@ -58,10 +63,12 @@ function isDimmed(gi: number, highlight: number | null): boolean {
   return highlight !== null && gi !== highlight
 }
 
-function arrowHeadPath(l: ResolvedLink): ReturnType<typeof Skia.Path.Make> | null {
-  const ar = arrowSegment(l, 1 / 3)
-  if (!ar) return null
-  const { x2, y2, ux, uy } = ar
+function arrowHeadPath(l: ResolvedLink, bend: number): ReturnType<typeof Skia.Path.Make> | null {
+  const g = linkChordGeometry(l)
+  if (!g) return null
+  const { cx, cy } = linkQuadControl(g, bend)
+  const pt = quadBezierPointAndTangent(g.sx, g.sy, cx, cy, g.ex, g.ey, 0.38)
+  const { x: x2, y: y2, ux, uy } = pt
   const px = -uy
   const py = ux
   const tip = 10
@@ -104,6 +111,8 @@ export default function NetworkGraphSkia({
     return links.filter((l) => visibleGroups.has(l.__groupIndex))
   }, [links, visibleGroups, inClusterMode])
 
+  const linkBendOffsets = computeLinkBendOffsets(visibleLinks)
+
   const visibleNodes = useMemo(() => {
     if (inClusterMode) return []
     return nodes.filter((n) => visibleGroups.has(groupIndexOfNode(n)))
@@ -116,7 +125,7 @@ export default function NetworkGraphSkia({
     >
       <Rect x={0} y={0} width={vw} height={vh} color="#000000" />
 
-      <Group transform={[{ scale: t.k }, { translateX: t.tx }, { translateY: t.ty }]}>
+      <Group transform={[{ translateX: t.tx }, { translateY: t.ty }, { scale: t.k }]}>
         <Circle cx={HUB_GRADIENT_CENTER.cx} cy={HUB_GRADIENT_CENTER.cy} r={HUB_GRADIENT_CENTER.r}>
           <RadialGradient
             c={vec(HUB_GRADIENT_CENTER.cx, HUB_GRADIENT_CENTER.cy)}
@@ -131,16 +140,22 @@ export default function NetworkGraphSkia({
             ? visibleLinks.map((l, i) => {
                 const gi = l.__groupIndex
                 const dim = isDimmed(gi, highlightGroup)
-                const seg = linkSegment(l)
-                const tri = arrowHeadPath(l)
-                if (!seg || !tri) return null
+                const bend = linkBendOffsets[i] ?? 0
+                const g = linkChordGeometry(l)
+                if (!g) return null
+                const { cx, cy } = linkQuadControl(g, bend)
+                const curve = Skia.Path.Make()
+                curve.moveTo(g.sx, g.sy)
+                curve.quadTo(cx, cy, g.ex, g.ey)
+                const tri = arrowHeadPath(l, bend)
+                if (!tri) return null
                 const opacity = dim ? 0.1 : 0.8
                 return (
                   <Fragment key={`lk-${l.source.id}-${l.target.id}-${i}`}>
-                    <Line
-                      p1={vec(seg.x1, seg.y1)}
-                      p2={vec(seg.x2, seg.y2)}
+                    <Path
+                      path={curve}
                       color={LINK_STROKE}
+                      style="stroke"
                       strokeWidth={LINK_WIDTH}
                       opacity={opacity}
                     />

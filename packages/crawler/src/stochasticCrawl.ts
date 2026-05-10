@@ -33,8 +33,8 @@ function applyEdges(
 
 /**
  * Stochastic BFS on GitHub follow graph:
- * - At each expanded node, sample `branchSample` neighbors from first-degree
- *   (followers ∪ following), pooled from the first `maxPagesPerSide` pages per side.
+ * - At each expanded node, sample up to `branchFollowers` random followers and
+ *   up to `branchFollowing` random following (first `maxPagesPerSide` pages per side).
  * - Expand only while `depth < maxDepth` (seed has depth 0).
  * - Same function is intended for: local CLI seeding, later server job after OAuth.
  */
@@ -74,7 +74,8 @@ export async function runStochasticCrawl(
       const picks = await sampleRandomFirstDegreeNeighbors(
         gh,
         subject.login,
-        config.branchSample,
+        config.branchFollowers,
+        config.branchFollowing,
         config.maxPagesPerSide,
         random,
       );
