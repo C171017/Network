@@ -6,7 +6,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { createClient } from "@supabase/supabase-js";
-import { expandFollowingDepthGraph } from "./githubExpand.js";
+import { DEFAULT_FOLLOWING_BRANCH, expandFollowingDepthGraph } from "./githubExpand.js";
 import { readFullGraph, readReachableGraph } from "./graphRead.js";
 import { openGraphDatabase, resolveGraphDbPath } from "./graphStore.js";
 import { readGithubLoginFromUser } from "./githubUser.js";
@@ -150,8 +150,11 @@ app.post("/api/graph/expand", async (c) => {
     return c.json({ error: "bad_request", message: "rootLogin is required" }, 400);
   }
 
-  const branchFollowing = Math.min(Math.max(body.maxFollowing ?? 3, 1), 20);
-  const branchFollowers = Math.min(Math.max(body.maxFollowers ?? body.maxFollowing ?? 3, 1), 20);
+  const branchFollowing = Math.min(Math.max(body.maxFollowing ?? DEFAULT_FOLLOWING_BRANCH, 1), 20);
+  const branchFollowers = Math.min(
+    Math.max(body.maxFollowers ?? body.maxFollowing ?? DEFAULT_FOLLOWING_BRANCH, 1),
+    20,
+  );
 
   try {
     const graph = await expandFollowingDepthGraph({

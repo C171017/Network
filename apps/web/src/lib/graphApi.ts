@@ -45,7 +45,7 @@ export async function expandGraph(params: {
   maxFollowing?: number
   maxFollowers?: number
 }): Promise<GraphDTO> {
-  const maxFollowing = params.maxFollowing ?? 5
+  const maxFollowing = params.maxFollowing ?? 2
   const res = await fetch(apiUrl('/api/graph/expand'), {
     method: 'POST',
     headers: {

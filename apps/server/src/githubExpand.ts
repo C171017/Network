@@ -12,7 +12,7 @@ import { persistFollowsEdge, persistNode, type NodeRowInput } from "./graphStore
 const API = "https://api.github.com";
 
 /** Target neighbors to keep per side (following / followers) after tiered selection. */
-export const DEFAULT_FOLLOWING_BRANCH = 3;
+export const DEFAULT_FOLLOWING_BRANCH = 2;
 /** Max `per_page` for list endpoints (GitHub allows up to 100). */
 export const DEFAULT_LIST_PER_PAGE = 100;
 /**
