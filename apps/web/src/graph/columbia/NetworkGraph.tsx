@@ -32,6 +32,57 @@ import {
 ////////////////////////////////////////////
 ////////////////////////////////////////////
 
+/** Present GitHub profile payload fields first; append remaining scalar keys. */
+const PROFILE_HOVER_PRIORITY = [
+  'login',
+  'name',
+  'bio',
+  'company',
+  'location',
+  'blog',
+  'email',
+  'twitter_username',
+  'hireable',
+  'public_repos',
+  'public_gists',
+  'followers',
+  'following',
+  'created_at',
+  'updated_at',
+  'html_url',
+  'type'
+];
+
+function formatNodeHoverText(d) {
+  const p = d.profile;
+  if (p && typeof p === 'object' && !Array.isArray(p)) {
+    const lines = [];
+    const shown = new Set();
+    for (const k of PROFILE_HOVER_PRIORITY) {
+      if (!Object.prototype.hasOwnProperty.call(p, k)) continue;
+      const v = p[k];
+      if (v == null || v === '') continue;
+      lines.push(`${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`);
+      shown.add(k);
+    }
+    for (const [k, v] of Object.entries(p)) {
+      if (shown.has(k)) continue;
+      if (v == null || v === '') continue;
+      if (typeof v === 'object') continue;
+      lines.push(`${k}: ${String(v)}`);
+    }
+    return lines.join('\n');
+  }
+  const bits = [
+    d.login && `login: ${d.login}`,
+    d.name && `name: ${d.name}`,
+    d.company && `company: ${d.company}`,
+    d.location && `location: ${d.location}`,
+    d.bio && `bio: ${d.bio}`,
+    d.websiteUrl && `blog: ${d.websiteUrl}`
+  ].filter(Boolean);
+  return bits.length ? bits.join('\n') : String(d.login ?? d.id ?? '');
+}
 
 function nodeAvatarUrl(d) {
   const u = d.avatarUrl != null ? String(d.avatarUrl).trim() : '';
@@ -243,6 +294,8 @@ const NetworkGraph = ({
   setInteractivePhysics
 }) => {
   const svgRef = useRef();
+  const visualizationAreaRef = useRef(null);
+  const hoverStatusRef = useRef(null);
   const controlsRef = useRef(null);
   const zoomRef = useRef(null);
   const zoomCleanupRef = useRef(null);
@@ -604,7 +657,8 @@ const NetworkGraph = ({
         .attr('orient', 'auto')
         .append('path')
         .attr('d', 'M0,-5L10,0L0,5')
-        .attr('fill', '#808080');
+        .attr('fill', '#ffffff')
+        .attr('fill-opacity', 0.55);
 
       if (enableHeavySvgEffects) {
         // Keep cluster cloud blur on desktop only; skip on mobile.
@@ -818,8 +872,9 @@ const NetworkGraph = ({
         .append('path')
         .attr('class', 'link-full')
         .attr('fill', 'none')
-        .attr('stroke', '#999')
-        .attr('stroke-width', 3);
+        .attr('stroke', '#ffffff')
+        .attr('stroke-width', 2)
+        .attr('stroke-linecap', 'round');
       const arrowLinks = activeLinkLayer.selectAll('.link-arrow')
         .data(data.links)
         .enter()
@@ -1289,6 +1344,53 @@ const NetworkGraph = ({
         }
       });
 
+      const placeHoverNearPointer = (event) => {
+        const el = hoverStatusRef.current;
+        const areaEl = visualizationAreaRef.current;
+        if (!el || !areaEl) return;
+        const rect = areaEl.getBoundingClientRect();
+        const pad = 8;
+        const gap = 14;
+
+        el.style.display = 'block';
+        const ew = el.offsetWidth;
+        const eh = el.offsetHeight;
+
+        let left = event.clientX - rect.left + gap;
+        let top = event.clientY - rect.top + gap;
+
+        if (left + ew > rect.width - pad) {
+          left = event.clientX - rect.left - gap - ew;
+        }
+        if (top + eh > rect.height - pad) {
+          top = event.clientY - rect.top - gap - eh;
+        }
+
+        left = Math.max(pad, Math.min(left, rect.width - Math.max(ew, 40) - pad));
+        top = Math.max(pad, Math.min(top, rect.height - Math.max(eh, 24) - pad));
+
+        el.style.left = `${left}px`;
+        el.style.top = `${top}px`;
+      };
+
+      node
+        .on('mouseover', (event, d) => {
+          const el = hoverStatusRef.current;
+          if (!el) return;
+          el.textContent = formatNodeHoverText(d);
+          el.style.display = 'block';
+          placeHoverNearPointer(event);
+        })
+        .on('mousemove', (event) => {
+          const el = hoverStatusRef.current;
+          if (!el || el.style.display === 'none') return;
+          placeHoverNearPointer(event);
+        })
+        .on('mouseout', () => {
+          const el = hoverStatusRef.current;
+          if (el) el.style.display = 'none';
+        });
+
       // ── Cluster interactivity (click-to-zoom) ───────────────────────────
       clusterGroupRecords.forEach(({ gi, sel }) => {
         const clusterSel = sel.style('pointer-events', 'auto');
@@ -1494,9 +1596,17 @@ const NetworkGraph = ({
 
   return (
     <div className={`network-container${desktopSafariClass}`}>
-      <div className="visualization-area">
+      <div ref={visualizationAreaRef} className="visualization-area">
         <svg ref={svgRef} className="network-graph"
           aria-label="Network graph visualization - draggable view"></svg>
+
+        <div
+          ref={hoverStatusRef}
+          className="graph-hover-status"
+          role="status"
+          aria-live="polite"
+          style={{ display: 'none' }}
+        />
 
         <PhysicsToggle
           darkSurface={darkSurface}

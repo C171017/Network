@@ -1,5 +1,12 @@
 import Database from "better-sqlite3";
-import type { GithubUserFull, GithubUserSlim } from "./types.js";
+import type { GithubPublicUser, GithubUserSlim } from "./types.js";
+
+function ensureProfileJsonColumn(db: Database.Database): void {
+  const cols = db.prepare(`PRAGMA table_info(nodes)`).all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === "profile_json")) {
+    db.exec(`ALTER TABLE nodes ADD COLUMN profile_json TEXT`);
+  }
+}
 
 export type OpenStoreOptions = {
   reset?: boolean;
@@ -23,6 +30,7 @@ export function openStore(dbPath: string, options?: OpenStoreOptions): Database.
       location TEXT,
       blog TEXT,
       html_url TEXT,
+      profile_json TEXT,
       updated_at TEXT NOT NULL
     );
 
@@ -38,6 +46,8 @@ export function openStore(dbPath: string, options?: OpenStoreOptions): Database.
     CREATE INDEX IF NOT EXISTS idx_nodes_expanded ON nodes(expanded);
     CREATE INDEX IF NOT EXISTS idx_nodes_depth ON nodes(depth);
   `);
+
+  ensureProfileJsonColumn(db);
 
   if (options?.reset) {
     db.exec(`DELETE FROM edges; DELETE FROM nodes;`);
@@ -71,15 +81,16 @@ export function insertSlimNodeIfMissing(
 
 export function markExpandedFullProfile(
   db: Database.Database,
-  user: GithubUserFull,
+  user: GithubPublicUser,
   depth: number,
 ): void {
   const now = new Date().toISOString();
+  const profileJson = JSON.stringify(user);
   const stmt = db.prepare(`
     INSERT INTO nodes (
-      github_id, login, depth, expanded, avatar_url, name, bio, company, location, blog, html_url, updated_at
+      github_id, login, depth, expanded, avatar_url, name, bio, company, location, blog, html_url, profile_json, updated_at
     ) VALUES (
-      @github_id, @login, @depth, 1, @avatar_url, @name, @bio, @company, @location, @blog, @html_url, @updated_at
+      @github_id, @login, @depth, 1, @avatar_url, @name, @bio, @company, @location, @blog, @html_url, @profile_json, @updated_at
     )
     ON CONFLICT(github_id) DO UPDATE SET
       depth = MIN(nodes.depth, excluded.depth),
@@ -91,6 +102,7 @@ export function markExpandedFullProfile(
       location = excluded.location,
       blog = excluded.blog,
       html_url = excluded.html_url,
+      profile_json = excluded.profile_json,
       updated_at = excluded.updated_at
   `);
   stmt.run({
@@ -104,6 +116,7 @@ export function markExpandedFullProfile(
     location: user.location,
     blog: user.blog,
     html_url: user.html_url,
+    profile_json: profileJson,
     updated_at: now,
   });
 }

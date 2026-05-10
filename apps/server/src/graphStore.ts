@@ -3,6 +3,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 
+function ensureProfileJsonColumn(db: Database.Database): void {
+  const cols = db.prepare(`PRAGMA table_info(nodes)`).all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === "profile_json")) {
+    db.exec(`ALTER TABLE nodes ADD COLUMN profile_json TEXT`);
+  }
+}
+
 /**
  * SQLite persistence for graph crawls. Schema matches `packages/crawler` so
  * `data/network.db` can be shared and accumulates across CLI + API runs.
@@ -37,6 +44,7 @@ export function openGraphDatabase(dbPath: string): Database.Database {
       location TEXT,
       blog TEXT,
       html_url TEXT,
+      profile_json TEXT,
       updated_at TEXT NOT NULL
     );
 
@@ -53,6 +61,8 @@ export function openGraphDatabase(dbPath: string): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_nodes_depth ON nodes(depth);
   `);
 
+  ensureProfileJsonColumn(db);
+
   return db;
 }
 
@@ -68,15 +78,17 @@ export type NodeRowInput = {
   location: string | null;
   blog: string | null;
   htmlUrl: string;
+  /** Stringified `GET /users/{login}` JSON; null for legacy slim rows. */
+  profileJson: string | null;
 };
 
 export function persistNode(db: Database.Database, row: NodeRowInput): void {
   const now = new Date().toISOString();
   const stmt = db.prepare(`
     INSERT INTO nodes (
-      github_id, login, depth, expanded, avatar_url, name, bio, company, location, blog, html_url, updated_at
+      github_id, login, depth, expanded, avatar_url, name, bio, company, location, blog, html_url, profile_json, updated_at
     ) VALUES (
-      @github_id, @login, @depth, @expanded, @avatar_url, @name, @bio, @company, @location, @blog, @html_url, @updated_at
+      @github_id, @login, @depth, @expanded, @avatar_url, @name, @bio, @company, @location, @blog, @html_url, @profile_json, @updated_at
     )
     ON CONFLICT(github_id) DO UPDATE SET
       depth = MIN(nodes.depth, excluded.depth),
@@ -88,6 +100,7 @@ export function persistNode(db: Database.Database, row: NodeRowInput): void {
       location = COALESCE(excluded.location, nodes.location),
       blog = COALESCE(excluded.blog, nodes.blog),
       html_url = COALESCE(excluded.html_url, nodes.html_url),
+      profile_json = COALESCE(excluded.profile_json, nodes.profile_json),
       updated_at = excluded.updated_at
   `);
   stmt.run({
@@ -102,6 +115,7 @@ export function persistNode(db: Database.Database, row: NodeRowInput): void {
     location: row.location,
     blog: row.blog,
     html_url: row.htmlUrl,
+    profile_json: row.profileJson,
     updated_at: now,
   });
 }

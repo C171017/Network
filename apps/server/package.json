@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@network/crawler": "file:../../packages/crawler",
     "@hono/node-server": "^1.13.7",
     "@supabase/supabase-js": "^2.49.1",
     "better-sqlite3": "^11.7.0",

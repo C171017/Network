@@ -21,6 +21,8 @@ export type GraphDTO = {
     isRoot: boolean
     depth: number
     expanded: 0 | 1
+    /** Full GitHub `GET /users/{login}` payload when stored from crawl */
+    profile: Record<string, unknown> | null
   }>
   edges: Array<{
     sourceGithubId: number

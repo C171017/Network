@@ -36,7 +36,18 @@ type NodeRow = {
   location: string | null;
   blog: string | null;
   html_url: string | null;
+  profile_json: string | null;
 };
+
+function parseProfileJson(raw: string | null): Record<string, unknown> | null {
+  if (raw == null || raw.trim() === "") return null;
+  try {
+    const v = JSON.parse(raw) as unknown;
+    return v !== null && typeof v === "object" ? (v as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
 
 function rowToNode(row: NodeRow, isRoot: boolean): NodeDTO {
   return {
@@ -52,6 +63,7 @@ function rowToNode(row: NodeRow, isRoot: boolean): NodeDTO {
     isRoot,
     depth: row.depth,
     expanded: row.expanded ? 1 : 0,
+    profile: parseProfileJson(row.profile_json),
   };
 }
 
@@ -72,9 +84,9 @@ function emptyGraph(rootLogin: string): GraphDTO {
   };
 }
 
-const NODE_SELECT = `github_id, login, depth, expanded, avatar_url, name, bio, company, location, blog, html_url`;
+const NODE_SELECT = `github_id, login, depth, expanded, avatar_url, name, bio, company, location, blog, html_url, profile_json`;
 
-const NODE_SELECT_N = `n.github_id, n.login, n.depth, n.expanded, n.avatar_url, n.name, n.bio, n.company, n.location, n.blog, n.html_url`;
+const NODE_SELECT_N = `n.github_id, n.login, n.depth, n.expanded, n.avatar_url, n.name, n.bio, n.company, n.location, n.blog, n.html_url, n.profile_json`;
 
 /**
  * All nodes (row-capped), then follows edges whose endpoints lie in that capped node set (edge-capped).

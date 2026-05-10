@@ -1,21 +1,10 @@
 import type { Database } from "better-sqlite3";
+import type { GithubPublicUser } from "@network/crawler";
 import { githubProfilePageUrl } from "./githubProfileUrl.js";
 import type { EdgeDTO, GraphDTO, NodeDTO } from "./graphTypes.js";
 import { persistFollowsEdge, persistNode, type NodeRowInput } from "./graphStore.js";
 
 const API = "https://api.github.com";
-
-type GithubUserApi = {
-  id: number;
-  login: string;
-  avatar_url: string;
-  name: string | null;
-  bio: string | null;
-  company: string | null;
-  location: string | null;
-  blog: string | null;
-  html_url: string;
-};
 
 /** Target neighbors to keep per side (following / followers) after tiered selection. */
 export const DEFAULT_FOLLOWING_BRANCH = 3;
@@ -63,21 +52,21 @@ function hasPresent(s: string | null | undefined): boolean {
   return typeof s === "string" && s.trim().length > 0;
 }
 
-function hasProfilePic(u: GithubUserApi): boolean {
+function hasProfilePic(u: GithubPublicUser): boolean {
   return hasPresent(u.avatar_url);
 }
 
-function matchesTier1(u: GithubUserApi): boolean {
+function matchesTier1(u: GithubPublicUser): boolean {
   return hasPresent(u.location) && hasPresent(u.company) && hasProfilePic(u);
 }
 
-function matchesTier2(u: GithubUserApi): boolean {
+function matchesTier2(u: GithubPublicUser): boolean {
   return hasPresent(u.location);
 }
 
-function dedupeByGithubId(users: GithubUserApi[]): GithubUserApi[] {
+function dedupeByGithubId(users: GithubPublicUser[]): GithubPublicUser[] {
   const seen = new Set<number>();
-  const out: GithubUserApi[] = [];
+  const out: GithubPublicUser[] = [];
   for (const u of users) {
     if (seen.has(u.id)) continue;
     seen.add(u.id);
@@ -95,15 +84,18 @@ function shuffleInPlace<T>(arr: T[]): T[] {
 }
 
 /** Merge full-profile responses (`GET /users/{login}`) over list payloads for neighbor scoring. */
-function materializePool(pool: GithubUserApi[], enriched: Map<number, GithubUserApi>): GithubUserApi[] {
+function materializePool(
+  pool: GithubPublicUser[],
+  enriched: Map<number, GithubPublicUser>,
+): GithubPublicUser[] {
   return pool.map((u) => enriched.get(u.id) ?? u);
 }
 
 /** Lists return Simple User objects; fetch full profiles for up to `budget` not-yet-enriched pool members. */
 async function enrichUpToBudget(
   token: string,
-  pool: GithubUserApi[],
-  enriched: Map<number, GithubUserApi>,
+  pool: GithubPublicUser[],
+  enriched: Map<number, GithubPublicUser>,
   budget: number,
 ): Promise<number> {
   if (budget <= 0) return 0;
@@ -111,7 +103,7 @@ async function enrichUpToBudget(
   const pending = shuffleInPlace(pool.filter((u) => !enriched.has(u.id)));
   for (const u of pending) {
     if (used >= budget) break;
-    const full = await ghFetch<GithubUserApi>(token, `/users/${encodeURIComponent(u.login)}`);
+    const full = await ghFetch<GithubPublicUser>(token, `/users/${encodeURIComponent(u.login)}`);
     enriched.set(full.id, full);
     used += 1;
   }
@@ -122,11 +114,11 @@ async function enrichUpToBudget(
  * Pick up to `target` users: prefer location+company+avatar, then any with location, then anyone.
  * Order within each tier is random (shuffle of pool at start, then linear passes preserve that order).
  */
-export function selectNeighborsTiered(pool: GithubUserApi[], target: number): GithubUserApi[] {
+export function selectNeighborsTiered(pool: GithubPublicUser[], target: number): GithubPublicUser[] {
   if (target <= 0 || pool.length === 0) return [];
 
   const shuffled = shuffleInPlace([...pool]);
-  const picked: GithubUserApi[] = [];
+  const picked: GithubPublicUser[] = [];
   const pickedIds = new Set<number>();
 
   for (const u of shuffled) {
@@ -165,19 +157,23 @@ async function collectNeighborsFromSide(
   secondBudgetPages: number,
   perPage: number,
   maxProfileEnrichments: number,
-): Promise<{ selected: GithubUserApi[]; pagesFetched: number }> {
+): Promise<{
+  selected: GithubPublicUser[];
+  pagesFetched: number;
+  enriched: Map<number, GithubPublicUser>;
+}> {
   const path =
     side === "following"
       ? `/users/${encodeURIComponent(login)}/following`
       : `/users/${encodeURIComponent(login)}/followers`;
 
-  let pool: GithubUserApi[] = [];
+  let pool: GithubPublicUser[] = [];
   let pagesFetched = 0;
-  const enriched = new Map<number, GithubUserApi>();
+  const enriched = new Map<number, GithubPublicUser>();
   let profileBudgetLeft = maxProfileEnrichments;
 
   const fetchPage = async (page: number) => {
-    const chunk = await ghFetch<GithubUserApi[]>(token, `${path}?per_page=${perPage}&page=${page}`);
+    const chunk = await ghFetch<GithubPublicUser[]>(token, `${path}?per_page=${perPage}&page=${page}`);
     pagesFetched = page;
     return chunk;
   };
@@ -189,7 +185,7 @@ async function collectNeighborsFromSide(
   profileBudgetLeft -= await enrichUpToBudget(token, pool, enriched, profileBudgetLeft);
   let selected = selectNeighborsTiered(materializePool(pool, enriched), target);
   if (selected.length >= target) {
-    return { selected: selected.slice(0, target), pagesFetched };
+    return { selected: selected.slice(0, target), pagesFetched, enriched };
   }
 
   for (let p = firstBudgetPages + 1; p <= secondBudgetPages; p++) {
@@ -198,15 +194,16 @@ async function collectNeighborsFromSide(
     profileBudgetLeft -= await enrichUpToBudget(token, pool, enriched, profileBudgetLeft);
     selected = selectNeighborsTiered(materializePool(pool, enriched), target);
     if (selected.length >= target) {
-      return { selected: selected.slice(0, target), pagesFetched };
+      return { selected: selected.slice(0, target), pagesFetched, enriched };
     }
   }
 
   selected = selectNeighborsTiered(materializePool(pool, enriched), target);
-  return { selected: selected.slice(0, target), pagesFetched };
+  return { selected: selected.slice(0, target), pagesFetched, enriched };
 }
 
-function toNode(user: GithubUserApi, isRoot: boolean, depth: number, expanded: 0 | 1): NodeDTO {
+function toNode(user: GithubPublicUser, isRoot: boolean, depth: number, expanded: 0 | 1): NodeDTO {
+  const profile = { ...(user as object) } as Record<string, unknown>;
   return {
     githubId: user.id,
     login: user.login,
@@ -220,6 +217,7 @@ function toNode(user: GithubUserApi, isRoot: boolean, depth: number, expanded: 0
     isRoot,
     depth,
     expanded,
+    profile,
   };
 }
 
@@ -236,7 +234,25 @@ function toNodeRow(n: NodeDTO, depth: number, expanded: 0 | 1): NodeRowInput {
     location: n.location,
     blog: n.websiteUrl,
     htmlUrl: n.profileUrl,
+    profileJson: n.profile != null ? JSON.stringify(n.profile) : null,
   };
+}
+
+async function mergeNeighborFromGithub(
+  token: string,
+  raw: GithubPublicUser,
+  sideEnriched: Map<number, GithubPublicUser>,
+  hopDepth: number,
+  nodeById: Map<number, NodeDTO>,
+): Promise<NodeDTO> {
+  const full =
+    sideEnriched.get(raw.id) ??
+    (await ghFetch<GithubPublicUser>(token, `/users/${encodeURIComponent(raw.login)}`));
+  const prev = nodeById.get(full.id);
+  const depth = prev ? Math.min(prev.depth, hopDepth + 1) : hopDepth + 1;
+  const expanded: 0 | 1 = prev?.expanded ?? 0;
+  const isRoot = prev?.isRoot ?? false;
+  return toNode(full, isRoot, depth, expanded);
 }
 
 /**
@@ -277,7 +293,7 @@ export async function expandFollowingDepthGraph(params: {
     500,
   );
 
-  const rootUser = await ghFetch<GithubUserApi>(token, `/users/${encodeURIComponent(rootLogin)}`);
+  const rootUser = await ghFetch<GithubPublicUser>(token, `/users/${encodeURIComponent(rootLogin)}`);
   const rootNode = toNode(rootUser, true, 0, 0);
   persistNode(db, toNodeRow(rootNode, 0, 0));
 
@@ -309,6 +325,12 @@ export async function expandFollowingDepthGraph(params: {
     if (expandedIds.has(u.id)) continue;
     expandedIds.add(u.id);
 
+    const freshSelf = await ghFetch<GithubPublicUser>(token, `/users/${encodeURIComponent(u.login)}`);
+    const isRootUser = u.id === rootNode.githubId;
+    const parentDto = toNode(freshSelf, isRootUser, u.depth, 1);
+    nodeById.set(u.id, parentDto);
+    persistNode(db, toNodeRow(parentDto, parentDto.depth, 1));
+
     const [followingPick, followersPick] = await Promise.all([
       collectNeighborsFromSide(
         token,
@@ -334,15 +356,10 @@ export async function expandFollowingDepthGraph(params: {
     const following = followingPick.selected;
     const followers = followersPick.selected;
 
-    const parentDto = nodeById.get(u.id)!;
-    persistNode(db, toNodeRow(parentDto, u.depth, 1));
-    parentDto.expanded = 1;
-
     for (const raw of following) {
-      const isNew = !nodeById.has(raw.id);
-      const child = isNew ? toNode(raw, false, u.depth + 1, 0) : nodeById.get(raw.id)!;
-      if (isNew) nodeById.set(child.githubId, child);
-      persistNode(db, toNodeRow(child, u.depth + 1, 0));
+      const child = await mergeNeighborFromGithub(token, raw, followingPick.enriched, u.depth, nodeById);
+      nodeById.set(child.githubId, child);
+      persistNode(db, toNodeRow(child, child.depth, child.expanded));
       addFollowsEdge(u.id, child.githubId);
       followingReturned += 1;
       queue.push({ id: child.githubId, login: child.login, depth: u.depth + 1 });
@@ -350,10 +367,9 @@ export async function expandFollowingDepthGraph(params: {
 
     for (const raw of followers) {
       // GitHub: raw is a follower of u → raw follows u
-      const isNew = !nodeById.has(raw.id);
-      const follower = isNew ? toNode(raw, false, u.depth + 1, 0) : nodeById.get(raw.id)!;
-      if (isNew) nodeById.set(follower.githubId, follower);
-      persistNode(db, toNodeRow(follower, u.depth + 1, 0));
+      const follower = await mergeNeighborFromGithub(token, raw, followersPick.enriched, u.depth, nodeById);
+      nodeById.set(follower.githubId, follower);
+      persistNode(db, toNodeRow(follower, follower.depth, follower.expanded));
       addFollowsEdge(follower.githubId, u.id);
       followersReturned += 1;
       queue.push({ id: follower.githubId, login: follower.login, depth: u.depth + 1 });

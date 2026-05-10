@@ -5,6 +5,7 @@ export { openStore, insertSlimNodeIfMissing } from "./sqliteStore.js";
 export type {
   StochasticCrawlConfig,
   CrawlStats,
+  GithubPublicUser,
   GithubUserFull,
   GithubUserSlim,
   NeighborPick,

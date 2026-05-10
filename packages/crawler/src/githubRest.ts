@@ -1,4 +1,4 @@
-import type { GithubUserFull, GithubUserSlim } from "./types.js";
+import type { GithubPublicUser, GithubUserSlim } from "./types.js";
 
 const API = "https://api.github.com";
 
@@ -42,8 +42,8 @@ export class GithubRestClient {
     return (await res.json()) as T;
   }
 
-  async getUser(login: string): Promise<GithubUserFull> {
-    return this.request<GithubUserFull>(`/users/${encodeURIComponent(login)}`);
+  async getUser(login: string): Promise<GithubPublicUser> {
+    return this.request<GithubPublicUser>(`/users/${encodeURIComponent(login)}`);
   }
 
   /**

@@ -27,6 +27,7 @@ export function graphDtoToVisualizationData(dto: GraphDTO): VisualizationGraphDa
     expanded: 'expanded' in n && (n.expanded === 0 || n.expanded === 1) ? n.expanded : 0,
     isRoot: n.isRoot,
     avatarUrl: n.avatarUrl,
+    profile: n.profile ?? null,
   }))
   const links = dto.edges.map((e) => ({
     source: e.sourceGithubId,
