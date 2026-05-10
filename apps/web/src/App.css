@@ -11,12 +11,67 @@ body {
   background: #000;
 }
 
-.app-logo-anchor {
+.app-logo-slot {
   position: fixed;
   top: max(12px, env(safe-area-inset-top));
   left: max(12px, env(safe-area-inset-left));
-  z-index: 250;
-  pointer-events: none;
+  z-index: 300;
+}
+
+.app-logo-hit {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  line-height: 0;
+  border-radius: 10px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app-logo-hit:focus-visible {
+  outline: 2px solid rgba(192, 132, 252, 0.75);
+  outline-offset: 4px;
+}
+
+.app-logo-frame {
+  display: block;
+  line-height: 0;
+  transition: transform 0.2s ease;
+  transform-origin: center center;
+}
+
+.app-logo-hit:hover .app-logo-frame,
+.app-logo-hit:focus-visible .app-logo-frame {
+  transform: scale(1.08);
+}
+
+@keyframes app-logo-shake {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  25% {
+    transform: translate(-1.5px, 0.5px) rotate(-2.2deg);
+  }
+  50% {
+    transform: translate(1.5px, -0.5px) rotate(2.2deg);
+  }
+  75% {
+    transform: translate(-1px, -0.8px) rotate(-1.5deg);
+  }
+}
+
+.app-logo-hit .app-logo.app-logo-shake {
+  animation: app-logo-shake 0.28s ease-in-out infinite;
+  transform-origin: center center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-logo-hit .app-logo.app-logo-shake {
+    animation: none;
+  }
 }
 
 .app-logo {
@@ -42,16 +97,43 @@ body {
   margin: 0;
 }
 
-.auth-chrome {
-  position: fixed;
-  top: max(12px, env(safe-area-inset-top));
-  right: max(12px, env(safe-area-inset-right));
-  z-index: 300;
-  width: min(280px, calc(100vw - 24px));
+.auth-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: min(280px, calc(100vw - 32px));
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 14px 14px 12px;
+  padding: 12px 12px 10px;
+}
+
+.auth-popover-title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+}
+
+.auth-popover-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: rgba(226, 232, 240, 0.82);
+}
+
+.auth-popover-hint-tight {
+  margin: -4px 0 0;
+  font-size: 0.72rem;
+  color: rgba(148, 163, 184, 0.95);
+}
+
+.auth-popover-crawl {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .glass-chrome {
@@ -65,25 +147,6 @@ body {
   color: rgba(248, 250, 252, 0.95);
   -webkit-backdrop-filter: saturate(140%) blur(14px);
   backdrop-filter: saturate(140%) blur(14px);
-}
-
-.chrome-title {
-  font-weight: 700;
-  font-size: 1.05rem;
-  letter-spacing: 0.02em;
-}
-
-.chrome-hint {
-  margin: 0;
-  font-size: 0.82rem;
-  line-height: 1.35;
-  color: rgba(226, 232, 240, 0.82);
-}
-
-.chrome-footer {
-  margin: 4px 0 0;
-  font-size: 0.75rem;
-  color: rgba(148, 163, 184, 0.95);
 }
 
 .chrome-pill {

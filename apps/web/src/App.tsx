@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import NetworkGraph from './components/NetworkGraph'
 import { graphDtoToForceData, type GraphData } from './graph/graphDto'
 import { expandGraph, fetchPublicGraph, fetchReachableGraph } from './lib/graphApi'
 import { supabase, isSupabaseConfigured } from './lib/supabase'
+import { LONG_PRESS_MS, LONG_PRESS_MOVE_CANCEL_PX } from './graph/columbia/graphConstants'
 import './App.css'
 
 type SessionInfo = {
@@ -40,6 +41,13 @@ export default function App() {
   const [rootOverride, setRootOverride] = useState('')
   /** Matches graph chrome (dark inner disk vs light outer); default dark for page background before graph reports. */
   const [uiSurfaceDark, setUiSurfaceDark] = useState(true)
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false)
+  const accountMenuRef = useRef<HTMLDivElement>(null)
+  /** Graph “drag physics” — toggled by long-pressing the logo (same duration as node long-press). */
+  const [interactivePhysics, setInteractivePhysics] = useState(false)
+  const logoLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const logoSuppressClickRef = useRef(false)
+  const logoPointerStartRef = useRef<{ x: number; y: number } | null>(null)
 
   useEffect(() => {
     if (!supabase) return
@@ -95,6 +103,81 @@ export default function App() {
       sub.subscription.unsubscribe()
     }
   }, [])
+
+  useEffect(() => {
+    if (!accountMenuOpen) return
+    function onPointerDown(e: PointerEvent) {
+      const el = accountMenuRef.current
+      if (!el?.contains(e.target as Node)) setAccountMenuOpen(false)
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setAccountMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [accountMenuOpen])
+
+  useEffect(() => {
+    return () => {
+      if (logoLongPressTimerRef.current != null) {
+        window.clearTimeout(logoLongPressTimerRef.current)
+        logoLongPressTimerRef.current = null
+      }
+    }
+  }, [])
+
+  function clearLogoLongPressTimer() {
+    if (logoLongPressTimerRef.current != null) {
+      window.clearTimeout(logoLongPressTimerRef.current)
+      logoLongPressTimerRef.current = null
+    }
+  }
+
+  function onLogoPointerDown(e: React.PointerEvent<HTMLButtonElement>) {
+    if (e.button !== 0) return
+    logoPointerStartRef.current = { x: e.clientX, y: e.clientY }
+    clearLogoLongPressTimer()
+    logoLongPressTimerRef.current = window.setTimeout(() => {
+      logoLongPressTimerRef.current = null
+      logoSuppressClickRef.current = true
+      setInteractivePhysics((v) => !v)
+      setAccountMenuOpen(false)
+    }, LONG_PRESS_MS)
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+
+  function onLogoPointerMove(e: React.PointerEvent<HTMLButtonElement>) {
+    const start = logoPointerStartRef.current
+    if (!start || logoLongPressTimerRef.current == null) return
+    const dx = e.clientX - start.x
+    const dy = e.clientY - start.y
+    if (dx * dx + dy * dy > LONG_PRESS_MOVE_CANCEL_PX * LONG_PRESS_MOVE_CANCEL_PX) {
+      clearLogoLongPressTimer()
+    }
+  }
+
+  function onLogoPointerEnd(e: React.PointerEvent<HTMLButtonElement>) {
+    clearLogoLongPressTimer()
+    logoPointerStartRef.current = null
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    } catch {
+      /* not captured */
+    }
+  }
+
+  function onLogoClick(e: React.MouseEvent<HTMLButtonElement>) {
+    if (logoSuppressClickRef.current) {
+      logoSuppressClickRef.current = false
+      e.preventDefault()
+      return
+    }
+    setAccountMenuOpen((o) => !o)
+  }
 
   const effectiveRoot = (rootOverride.trim() || session?.login || '').trim()
 
@@ -245,67 +328,123 @@ export default function App() {
         </div>
       ) : null}
 
-      <div className="app-logo-anchor" aria-hidden>
-        <img
-          className="app-logo"
-          src={uiSurfaceDark ? '/logo-blackback.png' : '/logo-whiteback.png'}
-          alt=""
-        />
+      <div className="app-logo-slot" ref={accountMenuRef}>
+        <button
+          type="button"
+          className={`app-logo-hit${interactivePhysics ? ' app-logo-physics-active' : ''}`}
+          aria-haspopup="dialog"
+          aria-expanded={accountMenuOpen}
+          aria-controls={accountMenuOpen ? 'account-menu' : undefined}
+          aria-pressed={interactivePhysics}
+          onPointerDown={onLogoPointerDown}
+          onPointerMove={onLogoPointerMove}
+          onPointerUp={onLogoPointerEnd}
+          onPointerCancel={onLogoPointerEnd}
+          onLostPointerCapture={() => clearLogoLongPressTimer()}
+          onClick={onLogoClick}
+          aria-label={
+            interactivePhysics
+              ? 'Account menu. Drag physics on; long press to turn off.'
+              : 'Account menu. Long press to turn on drag physics.'
+          }
+        >
+          <span className="app-logo-frame">
+            <img
+              className={`app-logo${interactivePhysics ? ' app-logo-shake' : ''}`}
+              src={uiSurfaceDark ? '/logo-blackback.png' : '/logo-whiteback.png'}
+              alt=""
+            />
+          </span>
+        </button>
+        {accountMenuOpen ? (
+          <div
+            id="account-menu"
+            className="auth-popover glass-chrome"
+            role="dialog"
+            aria-label={session ? 'Account' : 'Sign in'}
+          >
+            {!session ? (
+              <>
+                <div className="auth-popover-title">Sign in</div>
+                <p className="auth-popover-hint">
+                  GitHub hosts the actual login page. Continue there to authorize this app.
+                </p>
+                <button
+                  type="button"
+                  className="chrome-btn primary"
+                  onClick={() => {
+                    setAccountMenuOpen(false)
+                    void signIn()
+                  }}
+                >
+                  Continue with GitHub
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="auth-popover-title">Account</div>
+                <span className="chrome-pill">@{session.login}</span>
+                <button
+                  type="button"
+                  className="chrome-btn"
+                  onClick={() => {
+                    setAccountMenuOpen(false)
+                    void signOut()
+                  }}
+                >
+                  Sign out
+                </button>
+                <p className="auth-popover-hint auth-popover-hint-tight">
+                  No hosted sign-out URL—this only ends the session in this browser.
+                </p>
+                <div className="auth-popover-crawl">
+                  <label className="chrome-field">
+                    <span>Root for GitHub crawl</span>
+                    <input
+                      value={rootOverride}
+                      onChange={(e) => setRootOverride(e.target.value)}
+                      placeholder={`default: ${session.login}`}
+                      spellCheck={false}
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="chrome-btn primary"
+                    disabled={loading || !effectiveRoot}
+                    onClick={() => {
+                      void loadGraph()
+                      setAccountMenuOpen(false)
+                    }}
+                  >
+                    {loading ? 'Expanding…' : 'Expand from GitHub'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        ) : null}
       </div>
 
       <div className="graph-host">
         {graph && graph.nodes.length > 0 ? (
-          <NetworkGraph data={graph} onNodeCrawl={crawlFromLogin} onUiSurfaceChange={setUiSurfaceDark} />
+          <NetworkGraph
+            data={graph}
+            interactivePhysics={interactivePhysics}
+            onNodeCrawl={crawlFromLogin}
+            onUiSurfaceChange={setUiSurfaceDark}
+          />
         ) : graphLoading ? (
           <div className="graph-placeholder">Loading graph from database…</div>
         ) : (
           <div className="graph-placeholder">
-            No nodes in the local graph database yet. Sign in and use &quot;Expand from GitHub&quot; to crawl follows into
-            SQLite.
+            No nodes in the local graph database yet. Use the logo menu to sign in, then &quot;Expand from GitHub&quot; to crawl
+            follows into SQLite.
           </div>
         )}
       </div>
 
-      <div className="auth-chrome glass-chrome">
-        <div className="chrome-title">Network</div>
-        <p className="chrome-hint">
-          {session ? 'Your view: reachable subgraph from your login.' : 'Public view: all stored nodes and edges.'}
-        </p>
-        {!session ? (
-          <button type="button" className="chrome-btn primary" onClick={() => void signIn()}>
-            Sign in with GitHub
-          </button>
-        ) : (
-          <>
-            <span className="chrome-pill">@{session.login}</span>
-            <button type="button" className="chrome-btn" onClick={() => void signOut()}>
-              Sign out
-            </button>
-            <label className="chrome-field">
-              <span>Root for GitHub crawl</span>
-              <input
-                value={rootOverride}
-                onChange={(e) => setRootOverride(e.target.value)}
-                placeholder={`default: ${session.login}`}
-                spellCheck={false}
-                autoCapitalize="off"
-                autoCorrect="off"
-              />
-            </label>
-            <button
-              type="button"
-              className="chrome-btn primary"
-              disabled={loading || !effectiveRoot}
-              onClick={() => void loadGraph()}
-            >
-              {loading ? 'Expanding…' : 'Expand from GitHub'}
-            </button>
-          </>
-        )}
-        <p className="chrome-footer muted">
-          API <code>:8787</code> · Vite proxies <code>/api</code>
-        </p>
-      </div>
     </div>
   )
 }

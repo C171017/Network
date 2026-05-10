@@ -7,7 +7,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
-import ControlPanel, { PhysicsToggle } from './ControlPanel';
+import ControlPanel from './ControlPanel';
 import Legend from './Legend';
 import './NetworkGraph.css';
 import {
@@ -291,7 +291,6 @@ const NetworkGraph = ({
   setColorBy,
   data,
   interactivePhysics = false,
-  setInteractivePhysics,
   onNodeCrawl,
   onUiSurfaceChange
 }) => {
@@ -1135,7 +1134,7 @@ const NetworkGraph = ({
           const wx = (sx - currentTransform.x) / currentTransform.k;
           const wy = (sy - currentTransform.y) / currentTransform.k;
           const dist = Math.hypot(wx - CIRCLE_CX, wy - CIRCLE_CY);
-          return dist < CANVAS_WHITE_OUTER_RADIUS * 1.02;
+          return dist < CANVAS_WHITE_OUTER_RADIUS * 1.5;
         };
 
         const logoPxIsDark = (sx, sy) => {
@@ -1757,12 +1756,6 @@ const NetworkGraph = ({
           role="status"
           aria-live="polite"
           style={{ display: 'none' }}
-        />
-
-        <PhysicsToggle
-          darkSurface={darkSurface}
-          interactivePhysics={interactivePhysics}
-          setInteractivePhysics={setInteractivePhysics}
         />
 
         <div ref={controlsRef} className="controls-legend-container">
