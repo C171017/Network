@@ -8,9 +8,38 @@ import {
 } from "@network/crawler";
 import { githubProfilePageUrl } from "./githubProfileUrl.js";
 import type { EdgeDTO, GraphDTO, NodeDTO } from "./graphTypes.js";
+
+/** NDJSON stream payloads for `POST /api/graph/expand-stream`. */
+export type ExpandProgressEvent =
+  | { type: "node"; node: NodeDTO }
+  | { type: "edge"; edge: EdgeDTO }
+  | { type: "done"; summary: GraphDTO }
+  | { type: "error"; message: string };
 import { persistFollowsEdge, persistNode, type NodeRowInput } from "./graphStore.js";
 
 const API = "https://api.github.com";
+
+/** How often to call paginated `/social_accounts` and `/orgs` during an expand run. */
+export type GithubProfileAugmentsMode = "none" | "root" | "all";
+
+const EMPTY_AUGMENTS: { social_accounts: GithubSocialAccount[]; organizations: GithubPublicOrganization[] } = {
+  social_accounts: [],
+  organizations: [],
+};
+
+function normalizeLoginKey(login: string): string {
+  return login.trim().toLowerCase();
+}
+
+export function shouldFetchAugmentsForLogin(
+  login: string,
+  rootLoginTrimmed: string,
+  mode: GithubProfileAugmentsMode,
+): boolean {
+  if (mode === "none") return false;
+  if (mode === "all") return true;
+  return normalizeLoginKey(login) === normalizeLoginKey(rootLoginTrimmed);
+}
 
 /** Target neighbors to keep per side (following / followers) after tiered selection. */
 export const DEFAULT_FOLLOWING_BRANCH = 2;
@@ -30,7 +59,11 @@ export const DEFAULT_SECOND_BUDGET_PAGES = 3;
  * Max `GET /users/{login}` calls per side when turning list “simple users” into full profiles
  * so tier 1–2 (location / company / avatar fields) can use real values. Lists omit location/company.
  */
-export const DEFAULT_PROFILE_ENRICH_PER_SIDE = 45;
+export const DEFAULT_PROFILE_ENRICH_PER_SIDE = 12;
+/** Max paginated pages per augment list (`/social_accounts`, `/orgs`) when augments are fetched. */
+export const DEFAULT_AUGMENTS_MAX_PAGES = 2;
+/** Default: org/social list endpoints only for the seed user (fewer API calls). */
+export const DEFAULT_PROFILE_AUGMENTS_MODE: GithubProfileAugmentsMode = "root";
 /** Expand nodes at depths 0 … maxHopDepth - 1; deepest discovered users sit at `maxHopDepth`. */
 export const DEFAULT_MAX_HOP_DEPTH = 3;
 
@@ -54,11 +87,14 @@ async function ghFetch<T>(token: string, path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-const MAX_PUBLIC_LIST_PAGES = 10;
-
-async function ghFetchAllPages<T>(token: string, pathWithoutQuery: string): Promise<T[]> {
+async function ghFetchAugmentPages<T>(
+  token: string,
+  pathWithoutQuery: string,
+  maxPages: number,
+): Promise<T[]> {
+  const cap = Math.min(Math.max(maxPages, 1), 100);
   const out: T[] = [];
-  for (let page = 1; page <= MAX_PUBLIC_LIST_PAGES; page++) {
+  for (let page = 1; page <= cap; page++) {
     const chunk = await ghFetch<T[]>(token, `${pathWithoutQuery}?per_page=100&page=${page}`);
     if (!chunk.length) break;
     out.push(...chunk);
@@ -70,14 +106,18 @@ async function ghFetchAllPages<T>(token: string, pathWithoutQuery: string): Prom
 /**
  * Public supplemental data merged into `profile_json` (alongside full `GET /users/{login}` payload).
  */
-async function fetchProfileAugments(token: string, login: string): Promise<{
+async function fetchProfileAugments(
+  token: string,
+  login: string,
+  maxPages: number,
+): Promise<{
   social_accounts: GithubSocialAccount[];
   organizations: GithubPublicOrganization[];
 }> {
   const enc = encodeURIComponent(login);
   const [social_accounts, organizations] = await Promise.all([
-    ghFetchAllPages<GithubSocialAccount>(token, `/users/${enc}/social_accounts`),
-    ghFetchAllPages<GithubPublicOrganization>(token, `/users/${enc}/orgs`),
+    ghFetchAugmentPages<GithubSocialAccount>(token, `/users/${enc}/social_accounts`, maxPages),
+    ghFetchAugmentPages<GithubPublicOrganization>(token, `/users/${enc}/orgs`, maxPages),
   ]);
   return { social_accounts, organizations };
 }
@@ -261,7 +301,12 @@ function toNode(
   };
 }
 
-function toNodeRow(n: NodeDTO, user: GithubPublicUser, depth: number, expanded: 0 | 1): NodeRowInput {
+function toNodeRow(
+  n: NodeDTO,
+  user: GithubPublicUser,
+  depth: number,
+  expanded: 0 | 1,
+): Omit<NodeRowInput, "ownerUserId"> {
   const s = crawlScalarsFromGithubUser(user);
   return {
     githubId: n.githubId,
@@ -302,11 +347,18 @@ async function mergeNeighborFromGithub(
   sideEnriched: Map<number, GithubPublicUser>,
   hopDepth: number,
   nodeById: Map<number, NodeDTO>,
+  opts: {
+    rootLoginTrimmed: string;
+    profileAugmentsMode: GithubProfileAugmentsMode;
+    augmentsMaxPages: number;
+  },
 ): Promise<NeighborPersistBundle> {
   const full =
     sideEnriched.get(raw.id) ??
     (await ghFetch<GithubPublicUser>(token, `/users/${encodeURIComponent(raw.login)}`));
-  const augments = await fetchProfileAugments(token, full.login);
+  const augments = shouldFetchAugmentsForLogin(full.login, opts.rootLoginTrimmed, opts.profileAugmentsMode)
+    ? await fetchProfileAugments(token, full.login, opts.augmentsMaxPages)
+    : EMPTY_AUGMENTS;
   const prev = nodeById.get(full.id);
   const depth = prev ? Math.min(prev.depth, hopDepth + 1) : hopDepth + 1;
   const expanded: 0 | 1 = prev?.expanded ?? 0;
@@ -327,6 +379,7 @@ async function mergeNeighborFromGithub(
  * (`nodes`, `edges`) for accumulation across requests.
  */
 export async function expandFollowingDepthGraph(params: {
+  ownerUserId: string;
   token: string;
   rootLogin: string;
   db: Database;
@@ -343,8 +396,14 @@ export async function expandFollowingDepthGraph(params: {
   secondBudgetPages?: number;
   /** Cap `GET /users/{login}` calls per side per expanded node for location/company (lists omit them). */
   maxProfileEnrichmentsPerSide?: number;
+  /** Whether to load paginated org/social lists; default `root` (seed user only). */
+  profileAugments?: GithubProfileAugmentsMode;
+  /** Max pages per augment list when augments are fetched (default 2). */
+  augmentsMaxPages?: number;
+  /** Fire after each persisted node/edge and once with `done` (full graph) at the end. */
+  onProgress?: (event: ExpandProgressEvent) => void;
 }): Promise<GraphDTO> {
-  const { token, rootLogin, db } = params;
+  const { ownerUserId, token, rootLogin, db } = params;
   const branchFollowing = params.branchFollowing ?? DEFAULT_FOLLOWING_BRANCH;
   const branchFollowers = params.branchFollowers ?? branchFollowing;
   const maxHopDepth = params.maxHopDepth ?? DEFAULT_MAX_HOP_DEPTH;
@@ -355,20 +414,34 @@ export async function expandFollowingDepthGraph(params: {
     Math.max(params.maxProfileEnrichmentsPerSide ?? DEFAULT_PROFILE_ENRICH_PER_SIDE, 0),
     500,
   );
+  const profileAugmentsMode = params.profileAugments ?? DEFAULT_PROFILE_AUGMENTS_MODE;
+  const augmentsMaxPages = Math.min(
+    Math.max(params.augmentsMaxPages ?? DEFAULT_AUGMENTS_MAX_PAGES, 1),
+    100,
+  );
+  const onProgress = params.onProgress;
 
   const normalizedRoot = rootLogin.trim();
-  const [rootUser, rootAugments] = await Promise.all([
-    ghFetch<GithubPublicUser>(token, `/users/${encodeURIComponent(normalizedRoot)}`),
-    fetchProfileAugments(token, normalizedRoot),
-  ]);
+  const rootUser = await ghFetch<GithubPublicUser>(token, `/users/${encodeURIComponent(normalizedRoot)}`);
+  const rootAugments = shouldFetchAugmentsForLogin(rootUser.login, normalizedRoot, profileAugmentsMode)
+    ? await fetchProfileAugments(token, rootUser.login, augmentsMaxPages)
+    : EMPTY_AUGMENTS;
   const rootNode = toNode(rootUser, true, 0, 0, rootAugments);
-  persistNode(db, toNodeRow(rootNode, rootUser, 0, 0), {
+  persistNode(db, { ...toNodeRow(rootNode, rootUser, 0, 0), ownerUserId }, {
     socialAccounts: rootAugments.social_accounts,
     organizations: rootAugments.organizations,
   });
+  onProgress?.({ type: "node", node: rootNode });
 
   const nodeById = new Map<number, NodeDTO>();
   nodeById.set(rootNode.githubId, rootNode);
+
+  type WarmEntry = {
+    user: GithubPublicUser;
+    augments: { social_accounts: GithubSocialAccount[]; organizations: GithubPublicOrganization[] };
+  };
+  const warmCache = new Map<number, WarmEntry>();
+  warmCache.set(rootNode.githubId, { user: rootUser, augments: rootAugments });
 
   const edges: EdgeDTO[] = [];
   const edgeKeySeen = new Set<string>();
@@ -378,6 +451,12 @@ export async function expandFollowingDepthGraph(params: {
   ];
   const expandedIds = new Set<number>();
 
+  const neighborAugmentOpts = {
+    rootLoginTrimmed: normalizedRoot,
+    profileAugmentsMode,
+    augmentsMaxPages,
+  };
+
   let followingReturned = 0;
   let followersReturned = 0;
 
@@ -385,8 +464,10 @@ export async function expandFollowingDepthGraph(params: {
     const key = `${sourceId}->${targetId}`;
     if (edgeKeySeen.has(key)) return;
     edgeKeySeen.add(key);
-    persistFollowsEdge(db, sourceId, targetId);
-    edges.push({ sourceGithubId: sourceId, targetGithubId: targetId, kind: "follows" });
+    persistFollowsEdge(db, ownerUserId, sourceId, targetId);
+    const edge: EdgeDTO = { sourceGithubId: sourceId, targetGithubId: targetId, kind: "follows" };
+    edges.push(edge);
+    onProgress?.({ type: "edge", edge });
   }
 
   while (queue.length > 0) {
@@ -395,17 +476,27 @@ export async function expandFollowingDepthGraph(params: {
     if (expandedIds.has(u.id)) continue;
     expandedIds.add(u.id);
 
-    const [freshSelf, expandAugments] = await Promise.all([
-      ghFetch<GithubPublicUser>(token, `/users/${encodeURIComponent(u.login)}`),
-      fetchProfileAugments(token, u.login),
-    ]);
+    const warmed = warmCache.get(u.id);
+    let freshSelf: GithubPublicUser;
+    let expandAugments: WarmEntry["augments"];
+    if (warmed) {
+      freshSelf = warmed.user;
+      expandAugments = warmed.augments;
+    } else {
+      freshSelf = await ghFetch<GithubPublicUser>(token, `/users/${encodeURIComponent(u.login)}`);
+      expandAugments = shouldFetchAugmentsForLogin(freshSelf.login, normalizedRoot, profileAugmentsMode)
+        ? await fetchProfileAugments(token, freshSelf.login, augmentsMaxPages)
+        : EMPTY_AUGMENTS;
+      warmCache.set(u.id, { user: freshSelf, augments: expandAugments });
+    }
     const isRootUser = u.id === rootNode.githubId;
     const parentDto = toNode(freshSelf, isRootUser, u.depth, 1, expandAugments);
     nodeById.set(u.id, parentDto);
-    persistNode(db, toNodeRow(parentDto, freshSelf, parentDto.depth, 1), {
+    persistNode(db, { ...toNodeRow(parentDto, freshSelf, parentDto.depth, 1), ownerUserId }, {
       socialAccounts: expandAugments.social_accounts,
       organizations: expandAugments.organizations,
     });
+    onProgress?.({ type: "node", node: parentDto });
 
     const [followingPick, followersPick] = await Promise.all([
       collectNeighborsFromSide(
@@ -433,12 +524,21 @@ export async function expandFollowingDepthGraph(params: {
     const followers = followersPick.selected;
 
     for (const raw of following) {
-      const child = await mergeNeighborFromGithub(token, raw, followingPick.enriched, u.depth, nodeById);
+      const child = await mergeNeighborFromGithub(
+        token,
+        raw,
+        followingPick.enriched,
+        u.depth,
+        nodeById,
+        neighborAugmentOpts,
+      );
+      warmCache.set(child.dto.githubId, { user: child.fullUser, augments: child.profileAugments });
       nodeById.set(child.dto.githubId, child.dto);
-      persistNode(db, toNodeRow(child.dto, child.fullUser, child.dto.depth, child.dto.expanded), {
+      persistNode(db, { ...toNodeRow(child.dto, child.fullUser, child.dto.depth, child.dto.expanded), ownerUserId }, {
         socialAccounts: child.profileAugments.social_accounts,
         organizations: child.profileAugments.organizations,
       });
+      onProgress?.({ type: "node", node: child.dto });
       addFollowsEdge(u.id, child.dto.githubId);
       followingReturned += 1;
       queue.push({ id: child.dto.githubId, login: child.dto.login, depth: u.depth + 1 });
@@ -446,19 +546,31 @@ export async function expandFollowingDepthGraph(params: {
 
     for (const raw of followers) {
       // GitHub: raw is a follower of u → raw follows u
-      const follower = await mergeNeighborFromGithub(token, raw, followersPick.enriched, u.depth, nodeById);
+      const follower = await mergeNeighborFromGithub(
+        token,
+        raw,
+        followersPick.enriched,
+        u.depth,
+        nodeById,
+        neighborAugmentOpts,
+      );
+      warmCache.set(follower.dto.githubId, { user: follower.fullUser, augments: follower.profileAugments });
       nodeById.set(follower.dto.githubId, follower.dto);
-      persistNode(db, toNodeRow(follower.dto, follower.fullUser, follower.dto.depth, follower.dto.expanded), {
+      persistNode(db, {
+        ...toNodeRow(follower.dto, follower.fullUser, follower.dto.depth, follower.dto.expanded),
+        ownerUserId,
+      }, {
         socialAccounts: follower.profileAugments.social_accounts,
         organizations: follower.profileAugments.organizations,
       });
+      onProgress?.({ type: "node", node: follower.dto });
       addFollowsEdge(follower.dto.githubId, u.id);
       followersReturned += 1;
       queue.push({ id: follower.dto.githubId, login: follower.dto.login, depth: u.depth + 1 });
     }
   }
 
-  return {
+  const graph: GraphDTO = {
     rootLogin: rootNode.login,
     generatedAt: new Date().toISOString(),
     caps: { maxFollowers: branchFollowers, maxFollowing: branchFollowing },
@@ -471,4 +583,6 @@ export async function expandFollowingDepthGraph(params: {
     nodes: [...nodeById.values()],
     edges,
   };
+  onProgress?.({ type: "done", summary: graph });
+  return graph;
 }

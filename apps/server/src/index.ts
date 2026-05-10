@@ -4,9 +4,16 @@ import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { cors } from "hono/cors";
 import { createClient } from "@supabase/supabase-js";
-import { DEFAULT_FOLLOWING_BRANCH, expandFollowingDepthGraph } from "./githubExpand.js";
+import {
+  DEFAULT_AUGMENTS_MAX_PAGES,
+  DEFAULT_FOLLOWING_BRANCH,
+  DEFAULT_PROFILE_AUGMENTS_MODE,
+  expandFollowingDepthGraph,
+  type GithubProfileAugmentsMode,
+} from "./githubExpand.js";
 import { readFullGraph, readReachableGraph } from "./graphRead.js";
 import { openGraphDatabase, resolveGraphDbPath } from "./graphStore.js";
 import { readGithubLoginFromUser } from "./githubUser.js";
@@ -30,6 +37,78 @@ loadEnvFiles();
 
 const graphDbPath = resolveGraphDbPath();
 const graphDb = openGraphDatabase(graphDbPath);
+
+type ParsedExpandBody = {
+  rootLogin: string;
+  branchFollowing: number;
+  branchFollowers: number;
+  profileAugments: GithubProfileAugmentsMode;
+  augmentsMaxPages: number;
+  maxProfileEnrichmentsPerSide?: number;
+};
+
+function parseExpandJsonBody(raw: unknown): ParsedExpandBody | { error: string } {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return { error: "Expected JSON object body" };
+  }
+  const body = raw as {
+    rootLogin?: string;
+    maxFollowing?: number;
+    maxFollowers?: number;
+    profileAugments?: unknown;
+    augmentsMaxPages?: unknown;
+    maxProfileEnrichmentsPerSide?: unknown;
+  };
+  const rootLogin = body.rootLogin?.trim();
+  if (!rootLogin) {
+    return { error: "rootLogin is required" };
+  }
+
+  const branchFollowing = Math.min(Math.max(body.maxFollowing ?? DEFAULT_FOLLOWING_BRANCH, 1), 20);
+  const branchFollowers = Math.min(
+    Math.max(body.maxFollowers ?? body.maxFollowing ?? DEFAULT_FOLLOWING_BRANCH, 1),
+    20,
+  );
+
+  let profileAugments: GithubProfileAugmentsMode = DEFAULT_PROFILE_AUGMENTS_MODE;
+  if (body.profileAugments !== undefined && body.profileAugments !== null) {
+    const m = body.profileAugments;
+    if (m !== "none" && m !== "root" && m !== "all") {
+      return { error: 'profileAugments must be "none", "root", or "all".' };
+    }
+    profileAugments = m;
+  }
+
+  let augmentsMaxPages = DEFAULT_AUGMENTS_MAX_PAGES;
+  if (body.augmentsMaxPages !== undefined && body.augmentsMaxPages !== null) {
+    const n = body.augmentsMaxPages;
+    if (typeof n !== "number" || !Number.isInteger(n) || n < 1 || n > 100) {
+      return { error: "augmentsMaxPages must be an integer between 1 and 100." };
+    }
+    augmentsMaxPages = n;
+  }
+
+  let maxProfileEnrichmentsPerSide: number | undefined;
+  if (
+    body.maxProfileEnrichmentsPerSide !== undefined &&
+    body.maxProfileEnrichmentsPerSide !== null
+  ) {
+    const n = body.maxProfileEnrichmentsPerSide;
+    if (typeof n !== "number" || !Number.isInteger(n) || n < 0 || n > 500) {
+      return { error: "maxProfileEnrichmentsPerSide must be an integer between 0 and 500." };
+    }
+    maxProfileEnrichmentsPerSide = n;
+  }
+
+  return {
+    rootLogin,
+    branchFollowing,
+    branchFollowers,
+    profileAugments,
+    augmentsMaxPages,
+    ...(maxProfileEnrichmentsPerSide !== undefined ? { maxProfileEnrichmentsPerSide } : {}),
+  };
+}
 
 const app = new Hono();
 
@@ -98,7 +177,7 @@ app.get("/api/graph/me", async (c) => {
   }
 
   try {
-    const graph = readReachableGraph(graphDb, effectiveRoot);
+    const graph = readReachableGraph(graphDb, userData.user.id, effectiveRoot);
     return c.json(graph);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
@@ -106,69 +185,135 @@ app.get("/api/graph/me", async (c) => {
   }
 });
 
-app.post("/api/graph/expand", async (c) => {
+async function authorizeExpandRequest(c: Context) {
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseAnonKey) {
-    return c.json({ error: "server_misconfigured", message: "Missing SUPABASE_URL or SUPABASE_ANON_KEY" }, 500);
+    return {
+      error: c.json({ error: "server_misconfigured", message: "Missing SUPABASE_URL or SUPABASE_ANON_KEY" }, 500),
+    } as const;
   }
 
   const authHeader = c.req.header("authorization") ?? "";
   const match = authHeader.match(/^Bearer\s+(.+)$/i);
   if (!match) {
-    return c.json({ error: "unauthorized", message: "Missing Authorization: Bearer <supabase_access_token>" }, 401);
+    return { error: c.json({ error: "unauthorized", message: "Missing Authorization: Bearer <supabase_access_token>" }, 401) } as const;
   }
   const supabaseAccessToken = match[1]!.trim();
 
   const githubToken = c.req.header("x-github-access-token")?.trim();
   if (!githubToken) {
-    return c.json(
-      {
-        error: "bad_request",
-        message:
-          "Missing X-GitHub-Access-Token (Supabase session.provider_token after GitHub OAuth).",
-      },
-      400,
-    );
+    return {
+      error: c.json(
+        {
+          error: "bad_request",
+          message:
+            "Missing X-GitHub-Access-Token (Supabase session.provider_token after GitHub OAuth).",
+        },
+        400,
+      ),
+    } as const;
   }
 
   const supabase = createClient(supabaseUrl, supabaseAnonKey);
   const { data: userData, error: userErr } = await supabase.auth.getUser(supabaseAccessToken);
   if (userErr || !userData.user) {
-    return c.json({ error: "unauthorized", message: userErr?.message ?? "Invalid session" }, 401);
+    return { error: c.json({ error: "unauthorized", message: userErr?.message ?? "Invalid session" }, 401) } as const;
   }
 
-  let body: { rootLogin?: string; maxFollowing?: number; maxFollowers?: number };
+  return { githubToken, ownerUserId: userData.user.id } as const;
+}
+
+app.post("/api/graph/expand", async (c) => {
+  const auth = await authorizeExpandRequest(c);
+  if ("error" in auth) return auth.error;
+
+  let raw: unknown;
   try {
-    body = await c.req.json();
+    raw = await c.req.json();
   } catch {
     return c.json({ error: "bad_request", message: "Invalid JSON body" }, 400);
   }
 
-  const rootLogin = body.rootLogin?.trim();
-  if (!rootLogin) {
-    return c.json({ error: "bad_request", message: "rootLogin is required" }, 400);
+  const parsed = parseExpandJsonBody(raw);
+  if ("error" in parsed) {
+    return c.json({ error: "bad_request", message: parsed.error }, 400);
   }
-
-  const branchFollowing = Math.min(Math.max(body.maxFollowing ?? DEFAULT_FOLLOWING_BRANCH, 1), 20);
-  const branchFollowers = Math.min(
-    Math.max(body.maxFollowers ?? body.maxFollowing ?? DEFAULT_FOLLOWING_BRANCH, 1),
-    20,
-  );
 
   try {
     const graph = await expandFollowingDepthGraph({
-      token: githubToken,
-      rootLogin,
+      ownerUserId: auth.ownerUserId,
+      token: auth.githubToken,
       db: graphDb,
-      branchFollowing,
-      branchFollowers,
+      rootLogin: parsed.rootLogin,
+      branchFollowing: parsed.branchFollowing,
+      branchFollowers: parsed.branchFollowers,
+      profileAugments: parsed.profileAugments,
+      augmentsMaxPages: parsed.augmentsMaxPages,
+      ...(parsed.maxProfileEnrichmentsPerSide !== undefined
+        ? { maxProfileEnrichmentsPerSide: parsed.maxProfileEnrichmentsPerSide }
+        : {}),
     });
     return c.json(graph);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     return c.json({ error: "github_error", message }, 502);
   }
+});
+
+app.post("/api/graph/expand-stream", async (c) => {
+  const auth = await authorizeExpandRequest(c);
+  if ("error" in auth) return auth.error;
+
+  let raw: unknown;
+  try {
+    raw = await c.req.json();
+  } catch {
+    return c.json({ error: "bad_request", message: "Invalid JSON body" }, 400);
+  }
+
+  const parsed = parseExpandJsonBody(raw);
+  if ("error" in parsed) {
+    return c.json({ error: "bad_request", message: parsed.error }, 400);
+  }
+
+  const enc = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const writeEvent = (ev: unknown) => {
+        controller.enqueue(enc.encode(`${JSON.stringify(ev)}\n`));
+      };
+      try {
+        await expandFollowingDepthGraph({
+          ownerUserId: auth.ownerUserId,
+          token: auth.githubToken,
+          db: graphDb,
+          rootLogin: parsed.rootLogin,
+          branchFollowing: parsed.branchFollowing,
+          branchFollowers: parsed.branchFollowers,
+          profileAugments: parsed.profileAugments,
+          augmentsMaxPages: parsed.augmentsMaxPages,
+          ...(parsed.maxProfileEnrichmentsPerSide !== undefined
+            ? { maxProfileEnrichmentsPerSide: parsed.maxProfileEnrichmentsPerSide }
+            : {}),
+          onProgress: (event) => {
+            writeEvent(event);
+          },
+        });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        writeEvent({ type: "error", message });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return c.newResponse(stream, 200, {
+    "Content-Type": "application/x-ndjson",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  });
 });
 
 const port = Number(process.env.PORT ?? 8787);

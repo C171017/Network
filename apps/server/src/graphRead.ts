@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import { githubProfilePageUrl } from "./githubProfileUrl.js";
 import type { EdgeDTO, GraphDTO, NodeDTO } from "./graphTypes.js";
+import { publicGraphOwnerId } from "./graphStore.js";
 
 /**
  * Initial-screen node budget. Each read endpoint randomly samples up to this many
@@ -30,6 +31,7 @@ function readCaps(): { maxNodes: number; maxEdges: number | null } {
 }
 
 type NodeRow = {
+  owner_user_id: string;
   github_id: number;
   login: string;
   depth: number;
@@ -89,9 +91,11 @@ function emptyGraph(rootLogin: string): GraphDTO {
   };
 }
 
-const NODE_SELECT = `github_id, login, depth, expanded, avatar_url, name, bio, company, location, blog, html_url, profile_json`;
+const NODE_SELECT =
+  `owner_user_id, github_id, login, depth, expanded, avatar_url, name, bio, company, location, blog, html_url, profile_json`;
 
-const NODE_SELECT_N = `n.github_id, n.login, n.depth, n.expanded, n.avatar_url, n.name, n.bio, n.company, n.location, n.blog, n.html_url, n.profile_json`;
+const NODE_SELECT_N =
+  `n.owner_user_id, n.github_id, n.login, n.depth, n.expanded, n.avatar_url, n.name, n.bio, n.company, n.location, n.blog, n.html_url, n.profile_json`;
 
 /**
  * Random sample of up to `maxNodes` rows from `nodes`, then follows edges whose
@@ -102,10 +106,11 @@ const NODE_SELECT_N = `n.github_id, n.login, n.depth, n.expanded, n.avatar_url, 
 export function readFullGraph(db: Database.Database): GraphDTO {
   const { maxNodes, maxEdges } = readCaps();
   const now = new Date().toISOString();
+  const ownerUserId = publicGraphOwnerId();
 
   const nodeRows = db
-    .prepare(`SELECT ${NODE_SELECT} FROM nodes ORDER BY RANDOM() LIMIT ?`)
-    .all(maxNodes) as NodeRow[];
+    .prepare(`SELECT ${NODE_SELECT} FROM nodes WHERE owner_user_id = ? ORDER BY RANDOM() LIMIT ?`)
+    .all(ownerUserId, maxNodes) as NodeRow[];
 
   if (nodeRows.length === 0) {
     return {
@@ -136,10 +141,10 @@ export function readFullGraph(db: Database.Database): GraphDTO {
          FROM edges e
          INNER JOIN _graph_node_subset s ON s.id = e.source_id
          INNER JOIN _graph_node_subset t ON t.id = e.target_id
-         WHERE e.kind = 'follows'
+         WHERE e.kind = 'follows' AND e.owner_user_id = ?
          LIMIT ?`,
       )
-      .all(maxEdges ?? -1) as Array<{ source_id: number; target_id: number }>;
+      .all(ownerUserId, maxEdges ?? -1) as Array<{ source_id: number; target_id: number }>;
 
     const edges: EdgeDTO[] = edgeRows.map((e) => ({
       sourceGithubId: e.source_id,
@@ -186,7 +191,7 @@ function insertNodeSubsetIds(db: Database.Database, ids: number[]): void {
  * uniformly random-sampled down to that size — except the root is always
  * included, so the visualization stays anchored.
  */
-export function readReachableGraph(db: Database.Database, rootLogin: string): GraphDTO {
+export function readReachableGraph(db: Database.Database, ownerUserId: string, rootLogin: string): GraphDTO {
   const normalized = rootLogin.trim().toLowerCase();
   if (!normalized) return emptyGraph(rootLogin);
 
@@ -195,9 +200,9 @@ export function readReachableGraph(db: Database.Database, rootLogin: string): Gr
 
   const rootRow = db
     .prepare(
-      `SELECT ${NODE_SELECT} FROM nodes WHERE lower(login) = ? LIMIT 1`,
+      `SELECT ${NODE_SELECT} FROM nodes WHERE owner_user_id = ? AND lower(login) = ? LIMIT 1`,
     )
-    .get(normalized) as NodeRow | undefined;
+    .get(ownerUserId, normalized) as NodeRow | undefined;
 
   if (!rootRow) {
     return emptyGraph(rootLogin.trim());
@@ -205,11 +210,13 @@ export function readReachableGraph(db: Database.Database, rootLogin: string): Gr
 
   const visited = new Set<number>([rootRow.github_id]);
   const queue = [rootRow.github_id];
-  const followStmt = db.prepare(`SELECT target_id FROM edges WHERE kind = 'follows' AND source_id = ?`);
+  const followStmt = db.prepare(
+    `SELECT target_id FROM edges WHERE owner_user_id = ? AND kind = 'follows' AND source_id = ?`,
+  );
 
   while (queue.length > 0) {
     const u = queue.shift()!;
-    const targets = followStmt.all(u) as Array<{ target_id: number }>;
+    const targets = followStmt.all(ownerUserId, u) as Array<{ target_id: number }>;
     for (const { target_id: t } of targets) {
       if (visited.has(t)) continue;
       visited.add(t);
@@ -226,9 +233,10 @@ export function readReachableGraph(db: Database.Database, rootLogin: string): Gr
       .prepare(
         `SELECT ${NODE_SELECT_N}
          FROM nodes n
-         INNER JOIN _graph_node_subset g ON g.id = n.github_id`,
+         INNER JOIN _graph_node_subset g ON g.id = n.github_id
+         WHERE n.owner_user_id = ?`,
       )
-      .all() as NodeRow[];
+      .all(ownerUserId) as NodeRow[];
 
     const edgeRows = db
       .prepare(
@@ -236,10 +244,10 @@ export function readReachableGraph(db: Database.Database, rootLogin: string): Gr
          FROM edges e
          INNER JOIN _graph_node_subset s ON s.id = e.source_id
          INNER JOIN _graph_node_subset t ON t.id = e.target_id
-         WHERE e.kind = 'follows'
+         WHERE e.kind = 'follows' AND e.owner_user_id = ?
          LIMIT ?`,
       )
-      .all(maxEdges ?? -1) as Array<{ source_id: number; target_id: number }>;
+      .all(ownerUserId, maxEdges ?? -1) as Array<{ source_id: number; target_id: number }>;
 
     const nodes: NodeDTO[] = nodeRows.map((r) => rowToNode(r, r.github_id === rootRow.github_id));
     const edges: EdgeDTO[] = edgeRows.map((e) => ({
