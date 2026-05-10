@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import ColumbiaNetworkGraph from '../graph/columbia/NetworkGraph'
+import ColumbiaNetworkGraph from '../graph/columbia/ColumbiaNetworkGraph'
 import type { VisualizationGraphData } from '../graph/columbia/graphAdapter'
 
 type Props = {

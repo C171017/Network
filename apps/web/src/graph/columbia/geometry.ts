@@ -58,3 +58,42 @@ export function arrowPathAtFraction(d: SimLink | null | undefined, fraction = 1 
   const ey = d.source.y + dy * fraction
   return `M${sx},${sy}L${ex},${ey}`
 }
+
+export function linkSegment(
+  d: SimLink | null | undefined
+): { x1: number; y1: number; x2: number; y2: number } | null {
+  if (!d?.source || !d.target) return null
+  const dx = d.target.x - d.source.x
+  const dy = d.target.y - d.source.y
+  const dist = Math.hypot(dx, dy)
+  if (dist === 0) return null
+  const unitX = dx / dist
+  const unitY = dy / dist
+  return {
+    x1: d.source.x + unitX * NODE_RADIUS,
+    y1: d.source.y + unitY * NODE_RADIUS,
+    x2: d.target.x - unitX * NODE_RADIUS,
+    y2: d.target.y - unitY * NODE_RADIUS,
+  }
+}
+
+export function arrowSegment(
+  d: SimLink | null | undefined,
+  fraction = 1 / 3
+): { x1: number; y1: number; x2: number; y2: number; ux: number; uy: number } | null {
+  if (!d?.source || !d.target) return null
+  const dx = d.target.x - d.source.x
+  const dy = d.target.y - d.source.y
+  const dist = Math.hypot(dx, dy)
+  if (dist === 0) return null
+  const ux = dx / dist
+  const uy = dy / dist
+  return {
+    x1: d.source.x + ux * NODE_RADIUS,
+    y1: d.source.y + uy * NODE_RADIUS,
+    x2: d.source.x + dx * fraction,
+    y2: d.source.y + dy * fraction,
+    ux,
+    uy,
+  }
+}
