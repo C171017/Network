@@ -38,6 +38,8 @@ export default function App() {
   const [graphLoading, setGraphLoading] = useState(true)
   const [graph, setGraph] = useState<GraphData | null>(null)
   const [rootOverride, setRootOverride] = useState('')
+  /** Matches graph chrome (dark inner disk vs light outer); default dark for page background before graph reports. */
+  const [uiSurfaceDark, setUiSurfaceDark] = useState(true)
 
   useEffect(() => {
     if (!supabase) return
@@ -243,9 +245,17 @@ export default function App() {
         </div>
       ) : null}
 
+      <div className="app-logo-anchor" aria-hidden>
+        <img
+          className="app-logo"
+          src={uiSurfaceDark ? '/logo-blackback.png' : '/logo-whiteback.png'}
+          alt=""
+        />
+      </div>
+
       <div className="graph-host">
         {graph && graph.nodes.length > 0 ? (
-          <NetworkGraph data={graph} onNodeCrawl={crawlFromLogin} />
+          <NetworkGraph data={graph} onNodeCrawl={crawlFromLogin} onUiSurfaceChange={setUiSurfaceDark} />
         ) : graphLoading ? (
           <div className="graph-placeholder">Loading graph from database…</div>
         ) : (

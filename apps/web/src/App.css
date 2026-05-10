@@ -11,6 +11,21 @@ body {
   background: #000;
 }
 
+.app-logo-anchor {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top));
+  left: max(12px, env(safe-area-inset-left));
+  z-index: 250;
+  pointer-events: none;
+}
+
+.app-logo {
+  display: block;
+  height: clamp(28px, 5vw, 40px);
+  width: auto;
+  user-select: none;
+}
+
 .graph-host {
   position: fixed;
   inset: 0;

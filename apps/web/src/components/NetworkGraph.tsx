@@ -5,9 +5,11 @@ import type { VisualizationGraphData } from '../graph/columbia/graphAdapter'
 type Props = {
   data: VisualizationGraphData | null
   onNodeCrawl?: (login: string) => void
+  /** Same dark/light chrome as control panel & legend (inner disk vs outer ramp). */
+  onUiSurfaceChange?: (isDark: boolean) => void
 }
 
-export default function NetworkGraph({ data, onNodeCrawl }: Props) {
+export default function NetworkGraph({ data, onNodeCrawl, onUiSurfaceChange }: Props) {
   const [colorBy, setColorBy] = useState('depth')
   const [interactivePhysics, setInteractivePhysics] = useState(false)
   if (!data?.nodes?.length) return null
@@ -19,6 +21,7 @@ export default function NetworkGraph({ data, onNodeCrawl }: Props) {
       interactivePhysics={interactivePhysics}
       setInteractivePhysics={setInteractivePhysics}
       onNodeCrawl={onNodeCrawl}
+      onUiSurfaceChange={onUiSurfaceChange}
     />
   )
 }

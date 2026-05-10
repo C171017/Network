@@ -276,6 +276,9 @@ const VISUAL_SCENE_EXTENT = CIRCLE_DIAMETER + 2 * CANVAS_EDGE_FEATHER_HALF;
 const CANVAS_WHITE_INSET = 1300;
 const CANVAS_WHITE_OUTER_RADIUS = Math.max(0, CIRCLE_RADIUS - CANVAS_EDGE_FEATHER_HALF - CANVAS_WHITE_INSET);
 
+/** Widen the logo’s dark zone vs panel math so blackback kicks in at the edge of the ramp, not only when fully black. */
+const LOGO_DARK_DISK_RADIUS_FACTOR = 1.06;
+
 // clamping and color-map helpers are extracted in feature modules.
 
 ////////////////////////////////////////////////////////////////////////
@@ -289,7 +292,8 @@ const NetworkGraph = ({
   data,
   interactivePhysics = false,
   setInteractivePhysics,
-  onNodeCrawl
+  onNodeCrawl,
+  onUiSurfaceChange
 }) => {
   const svgRef = useRef();
   const visualizationAreaRef = useRef(null);
@@ -303,6 +307,10 @@ const NetworkGraph = ({
   const onNodeCrawlRef = useRef(onNodeCrawl);
   useEffect(() => {
     onNodeCrawlRef.current = onNodeCrawl;
+  });
+  const onUiSurfaceChangeRef = useRef(onUiSurfaceChange);
+  useEffect(() => {
+    onUiSurfaceChangeRef.current = onUiSurfaceChange;
   });
   const [colorMaps, setColorMaps] = useState({});
   const [darkSurface, setDarkSurface] = useState(false);
@@ -841,7 +849,8 @@ const NetworkGraph = ({
 
       let currentTransform = d3.zoomIdentity;
       let visibleGroups = new Set();
-      let lastUiIsDark = null;
+      let lastPanelUiIsDark = null;
+      let lastLogoUiIsDark = null;
       let inClusterMode = false;
 
       const linkForce = d3.forceLink(data.links)
@@ -1119,27 +1128,44 @@ const NetworkGraph = ({
       };
 
       const updateUiSurfaceTheme = () => {
-        const controlsEl = controlsRef.current;
-        if (!controlsEl) return;
-
         const graphRect = svgRef.current.getBoundingClientRect();
-        const panelRect = controlsEl.getBoundingClientRect();
         if (!graphRect.width || !graphRect.height) return;
 
-        // Panel center in graph-local screen space.
-        const sx = panelRect.left + panelRect.width / 2 - graphRect.left;
-        const sy = panelRect.top + panelRect.height / 2 - graphRect.top;
+        const screenPxIsDark = (sx, sy) => {
+          const wx = (sx - currentTransform.x) / currentTransform.k;
+          const wy = (sy - currentTransform.y) / currentTransform.k;
+          const dist = Math.hypot(wx - CIRCLE_CX, wy - CIRCLE_CY);
+          return dist < CANVAS_WHITE_OUTER_RADIUS * 1.02;
+        };
 
-        // Convert from screen -> world using the current zoom transform.
-        const wx = (sx - currentTransform.x) / currentTransform.k;
-        const wy = (sy - currentTransform.y) / currentTransform.k;
-        const dist = Math.hypot(wx - CIRCLE_CX, wy - CIRCLE_CY);
+        const logoPxIsDark = (sx, sy) => {
+          const wx = (sx - currentTransform.x) / currentTransform.k;
+          const wy = (sy - currentTransform.y) / currentTransform.k;
+          const dist = Math.hypot(wx - CIRCLE_CX, wy - CIRCLE_CY);
+          return dist < CANVAS_WHITE_OUTER_RADIUS * 1.2 * LOGO_DARK_DISK_RADIUS_FACTOR;
+        };
 
-        // Outside/near outer ring is visually light; inner disk is dark.
-        const uiIsDark = dist < CANVAS_WHITE_OUTER_RADIUS * 1.02;
-        if (uiIsDark !== lastUiIsDark) {
-          lastUiIsDark = uiIsDark;
-          setDarkSurface(uiIsDark);
+        const controlsEl = controlsRef.current;
+        if (controlsEl) {
+          const panelRect = controlsEl.getBoundingClientRect();
+          const sx = panelRect.left + panelRect.width / 2 - graphRect.left;
+          const sy = panelRect.top + panelRect.height / 2 - graphRect.top;
+          const panelIsDark = screenPxIsDark(sx, sy);
+          if (panelIsDark !== lastPanelUiIsDark) {
+            lastPanelUiIsDark = panelIsDark;
+            setDarkSurface(panelIsDark);
+          }
+        }
+
+        // Upper-left app logo (`App.css` `.app-logo-anchor` + ~half rendered size).
+        const logoInset = 12;
+        const logoSx = logoInset + 36;
+        const logoSy = logoInset + 17;
+        const logoIsDark = logoPxIsDark(logoSx, logoSy);
+        if (logoIsDark !== lastLogoUiIsDark) {
+          lastLogoUiIsDark = logoIsDark;
+          const notify = onUiSurfaceChangeRef.current;
+          if (typeof notify === 'function') notify(logoIsDark);
         }
       };
 
