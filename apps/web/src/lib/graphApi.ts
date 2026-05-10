@@ -29,6 +29,13 @@ export type GraphDTO = {
   }>
 }
 
+const apiBase = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '')
+
+function apiUrl(path: string): string {
+  const p = path.startsWith('/') ? path : `/${path}`
+  return apiBase ? `${apiBase}${p}` : p
+}
+
 export async function expandGraph(params: {
   supabaseAccessToken: string
   githubAccessToken: string
@@ -37,7 +44,7 @@ export async function expandGraph(params: {
   maxFollowers?: number
 }): Promise<GraphDTO> {
   const maxFollowing = params.maxFollowing ?? 5
-  const res = await fetch('/api/graph/expand', {
+  const res = await fetch(apiUrl('/api/graph/expand'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -70,7 +77,7 @@ async function parseGraphResponse(res: Response): Promise<GraphDTO> {
 }
 
 export async function fetchPublicGraph(): Promise<GraphDTO> {
-  const res = await fetch('/api/graph/public')
+  const res = await fetch(apiUrl('/api/graph/public'))
   return parseGraphResponse(res)
 }
 
@@ -79,7 +86,7 @@ export async function fetchReachableGraph(params: {
   rootLogin?: string
 }): Promise<GraphDTO> {
   const q = params.rootLogin?.trim() ? `?rootLogin=${encodeURIComponent(params.rootLogin.trim())}` : ''
-  const res = await fetch(`/api/graph/me${q}`, {
+  const res = await fetch(apiUrl(`/api/graph/me${q}`), {
     headers: {
       Authorization: `Bearer ${params.supabaseAccessToken}`,
     },
