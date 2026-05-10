@@ -332,3 +332,14 @@ export async function fetchReachableGraph(params: {
   })
   return parseGraphResponse(res)
 }
+
+export async function fetchOwnedGraph(params: {
+  supabaseAccessToken: string
+}): Promise<GraphDTO> {
+  const res = await fetch(apiUrl('/api/graph/me?scope=owner'), {
+    headers: {
+      Authorization: `Bearer ${params.supabaseAccessToken}`,
+    },
+  })
+  return parseGraphResponse(res)
+}

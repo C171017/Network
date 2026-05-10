@@ -1,35 +1,25 @@
 import { useMemo } from 'react'
 import './Legend.css'
-import { getCategoricalColor } from './colorPalette'
-import { extractNodeValues, getColorableFieldKeys } from './fieldMetadata'
 
 type LegendItem = { color: string; label: string; isDashed?: boolean }
 
 type Props = {
   colorBy: string
-  data: { nodes?: Array<Record<string, unknown>> } | null
+  colorMaps: Record<string, Record<string, string>>
   darkSurface?: boolean
 }
 
-export default function Legend({ colorBy, data, darkSurface = false }: Props) {
+export default function Legend({ colorBy, colorMaps, darkSurface = false }: Props) {
   const legendItems = useMemo(() => {
-    const nodes = data?.nodes
-    if (!nodes?.length) return {} as Record<string, LegendItem[]>
-
-    const toLegend = (key: string): LegendItem[] => {
-      const uniq = [...new Set(nodes.flatMap((n) => extractNodeValues(n, key)))]
-      return uniq.map((v, i) => ({
-        color: getCategoricalColor(i),
-        label: v,
-      }))
-    }
-
     const items: Record<string, LegendItem[]> = {}
-    getColorableFieldKeys(nodes[0]!).forEach((k) => {
-      items[k] = toLegend(k)
+    Object.entries(colorMaps || {}).forEach(([key, map]) => {
+      items[key] = Object.entries(map || {}).map(([label, color]) => ({
+        label,
+        color,
+      }))
     })
     return items
-  }, [data])
+  }, [colorMaps])
 
   const currentItems = legendItems[colorBy] || []
 

@@ -35,7 +35,13 @@ import {
 
 function summarizeTopology(nodes, links) {
   const nodeIds = new Set(nodes.map((n) => n.id));
-  const linkKeys = new Set((links ?? []).map((l) => `${l.source}->${l.target}`));
+  const linkKeys = new Set(
+    (links ?? []).map((l) => {
+      const s = typeof l.source === 'object' && l.source !== null ? l.source.id : l.source;
+      const t = typeof l.target === 'object' && l.target !== null ? l.target.id : l.target;
+      return `${s}->${t}`;
+    }),
+  );
   return { nodeIds, linkKeys };
 }
 
@@ -483,6 +489,9 @@ const ZOOM_CLUSTER_THRESHOLD_MOBILE = 0.08;
 const CLUSTER_GROUP_MIN_NODES = 8;
 const CLUSTER_EXIT_HYSTERESIS = 0.02;
 const CLUSTER_EXCLUDED_COLORS = new Set(['#9e9e9e', '#999999', '#808080', 'gray', 'grey']);
+// Keep all groups visually present in normal mode so expands feel additive.
+// Cluster mode still handles far-zoom performance reduction.
+const ENABLE_VIEWPORT_GROUP_CULLING = false;
 
 const MOBILE_BREAKPOINT_PX = 768;
 function isMobileViewport() {
@@ -1658,28 +1667,31 @@ const NetworkGraph = ({
         if (inClusterMode) return;
 
         // ── Normal mode: viewport cull ──
-        const margin = NODE_RADIUS + 20;
-        const minX = (-t.x) / t.k - margin;
-        const maxX = (width - t.x) / t.k + margin;
-        const minY = (-t.y) / t.k - margin;
-        const maxY = (height - t.y) / t.k + margin;
-
-        const seen = Array.from({ length: groupCount }, () => false);
-        let seenCount = 0;
-        for (const n of live.nodes) {
-          const gi = n.__groupIndex;
-          if (seen[gi]) continue;
-          if (n.x >= minX && n.x <= maxX && n.y >= minY && n.y <= maxY) {
-            seen[gi] = true;
-            seenCount += 1;
-            if (seenCount === groupCount) break;
-          }
-        }
-
         const nextVisibleGroups = new Set();
-        seen.forEach((v, i) => { if (v) nextVisibleGroups.add(i); });
-        if (nextVisibleGroups.size === 0 && groupCount > 0) {
-          nextVisibleGroups.add(0);
+        if (ENABLE_VIEWPORT_GROUP_CULLING) {
+          const margin = NODE_RADIUS + 20;
+          const minX = (-t.x) / t.k - margin;
+          const maxX = (width - t.x) / t.k + margin;
+          const minY = (-t.y) / t.k - margin;
+          const maxY = (height - t.y) / t.k + margin;
+
+          const seen = Array.from({ length: groupCount }, () => false);
+          let seenCount = 0;
+          for (const n of live.nodes) {
+            const gi = n.__groupIndex;
+            if (seen[gi]) continue;
+            if (n.x >= minX && n.x <= maxX && n.y >= minY && n.y <= maxY) {
+              seen[gi] = true;
+              seenCount += 1;
+              if (seenCount === groupCount) break;
+            }
+          }
+          seen.forEach((v, i) => { if (v) nextVisibleGroups.add(i); });
+          if (nextVisibleGroups.size === 0 && groupCount > 0) {
+            nextVisibleGroups.add(0);
+          }
+        } else {
+          for (let gi = 0; gi < groupCount; gi += 1) nextVisibleGroups.add(gi);
         }
 
         const changed =
@@ -2516,8 +2528,9 @@ const NetworkGraph = ({
             setColorBy={setColorBy}
             nodes={data.nodes}
             darkSurface={darkSurface}
+            hideDepthOption={!authenticatedSession}
           />
-          <Legend colorBy={colorBy} data={data} darkSurface={darkSurface} />
+          <Legend colorBy={colorBy} colorMaps={colorMaps} darkSurface={darkSurface} />
         </div>
       </div>
     </div>

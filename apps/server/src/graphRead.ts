@@ -275,6 +275,81 @@ export function readReachableGraph(db: Database.Database, ownerUserId: string, r
 }
 
 /**
+ * Deterministic owner-scoped graph read for continuity across sessions.
+ * Unlike `readReachableGraph`, this does not anchor to one root login.
+ */
+export function readOwnerGraph(db: Database.Database, ownerUserId: string): GraphDTO {
+  const { maxNodes, maxEdges } = readCaps();
+  const now = new Date().toISOString();
+
+  const nodeRows = db
+    .prepare(
+      `SELECT ${NODE_SELECT}
+       FROM nodes
+       WHERE owner_user_id = ?
+       ORDER BY updated_at DESC, github_id ASC
+       LIMIT ?`,
+    )
+    .all(ownerUserId, maxNodes) as NodeRow[];
+
+  if (nodeRows.length === 0) {
+    return {
+      rootLogin: "",
+      generatedAt: now,
+      caps: { maxFollowers: 0, maxFollowing: 0 },
+      truncation: {
+        followersTotal: null,
+        followingTotal: null,
+        followersReturned: 0,
+        followingReturned: 0,
+      },
+      nodes: [],
+      edges: [],
+    };
+  }
+
+  const nodes: NodeDTO[] = nodeRows.map((r) => rowToNode(r, false));
+  const ids = nodeRows.map((r) => r.github_id);
+  ensureNodeSubsetTemp(db);
+  insertNodeSubsetIds(db, ids);
+
+  try {
+    const edgeRows = db
+      .prepare(
+        `SELECT e.source_id, e.target_id
+         FROM edges e
+         INNER JOIN _graph_node_subset s ON s.id = e.source_id
+         INNER JOIN _graph_node_subset t ON t.id = e.target_id
+         WHERE e.kind = 'follows' AND e.owner_user_id = ?
+         LIMIT ?`,
+      )
+      .all(ownerUserId, maxEdges ?? -1) as Array<{ source_id: number; target_id: number }>;
+
+    const edges: EdgeDTO[] = edgeRows.map((e) => ({
+      sourceGithubId: e.source_id,
+      targetGithubId: e.target_id,
+      kind: "follows" as const,
+    }));
+
+    return {
+      rootLogin: "",
+      generatedAt: now,
+      caps: { maxFollowers: 0, maxFollowing: 0 },
+      truncation: {
+        followersTotal: null,
+        followingTotal: null,
+        followersReturned: 0,
+        followingReturned: edges.length,
+      },
+      nodes,
+      edges,
+    };
+  } finally {
+    db.exec(`DELETE FROM _graph_node_subset`);
+  }
+}
+
+/**
  * Uniform partial Fisher–Yates: returns up to `limit` ids from `all`, always
  * including `keepId`. If the set is already within the cap, returns it as-is.
  */

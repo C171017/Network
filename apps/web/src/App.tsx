@@ -5,8 +5,8 @@ import { graphDtoToForceData, type GraphData } from './graph/graphDto'
 import {
   DEFAULT_EXPAND_STREAM_THROTTLE_MS,
   expandGraphStream,
+  fetchOwnedGraph,
   fetchPublicGraph,
-  fetchReachableGraph,
   type GraphDTO,
 } from './lib/graphApi'
 import { supabase, isSupabaseConfigured } from './lib/supabase'
@@ -257,7 +257,7 @@ export default function App() {
           const dto = await fetchPublicGraph()
           setGraph(graphDtoToForceData(dto))
         } else {
-          const dto = await fetchReachableGraph({
+          const dto = await fetchOwnedGraph({
             supabaseAccessToken: session.supabaseAccessToken,
           })
           if (dto.nodes.length > 0) {
@@ -343,7 +343,6 @@ export default function App() {
             setGraph((prev) => mergeGraphDataAdditive(prev, incoming))
           },
         })
-        await refreshGraphFromSql({ suppressLoadingSpinner: true })
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
       }

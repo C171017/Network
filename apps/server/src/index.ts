@@ -14,7 +14,7 @@ import {
   expandFollowingDepthGraph,
   type GithubProfileAugmentsMode,
 } from "./githubExpand.js";
-import { readFullGraph, readReachableGraph } from "./graphRead.js";
+import { readFullGraph, readOwnerGraph, readReachableGraph } from "./graphRead.js";
 import { openGraphDatabase, resolveGraphDbPath } from "./graphStore.js";
 import { readGithubLoginFromUser } from "./githubUser.js";
 
@@ -162,6 +162,17 @@ app.get("/api/graph/me", async (c) => {
       { error: "bad_request", message: "Could not infer GitHub login from Supabase user metadata." },
       400,
     );
+  }
+
+  const scope = (c.req.query("scope") ?? "").trim().toLowerCase();
+  if (scope === "owner") {
+    try {
+      const graph = readOwnerGraph(graphDb, userData.user.id);
+      return c.json(graph);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return c.json({ error: "graph_read_failed", message }, 500);
+    }
   }
 
   const qRoot = c.req.query("rootLogin")?.trim();

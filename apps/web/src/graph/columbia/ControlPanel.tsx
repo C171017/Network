@@ -7,18 +7,22 @@ type Props = {
   setColorBy: (v: string) => void
   nodes?: Array<Record<string, unknown>>
   darkSurface?: boolean
+  hideDepthOption?: boolean
 }
 
 export default function ControlPanel({
   colorBy,
   setColorBy,
   nodes = [],
-  darkSurface = false
+  darkSurface = false,
+  hideDepthOption = false
 }: Props) {
   const colorOptions = useMemo(() => {
     if (!nodes.length) return []
-    return getColorableFieldKeys(nodes[0]!).map((k) => ({ value: k, label: toLabel(k) }))
-  }, [nodes])
+    return getColorableFieldKeys(nodes[0]!)
+      .filter((k) => !(hideDepthOption && k === 'depth'))
+      .map((k) => ({ value: k, label: toLabel(k) }))
+  }, [nodes, hideDepthOption])
 
   useEffect(() => {
     if (!colorOptions.length) {
