@@ -168,6 +168,7 @@ export default function ColumbiaNetworkGraph({ colorBy, setColorBy, data }: Prop
       minK,
       maxK
     )
+    transformRef.current = t0
     setTransform(t0)
     fittedForLayoutRef.current = gen
   }, [nodes.length, viewport.width, viewport.height, dataKey])
@@ -290,9 +291,6 @@ export default function ColumbiaNetworkGraph({ colorBy, setColorBy, data }: Prop
     ty: number
   } | null>(null)
 
-  const panningRef = useRef(false)
-  const panStartRef = useRef<{ lx: number; ly: number; tx: number; ty: number } | null>(null)
-
   const draggingRef = useRef<{
     id: number
     hadMove: boolean
@@ -334,11 +332,13 @@ export default function ColumbiaNetworkGraph({ colorBy, setColorBy, data }: Prop
       const step = (now: number) => {
         const u = Math.min(1, (now - t0) / dur)
         const e = u * u * (3 - 2 * u)
-        setTransform({
+        const next = {
           k: start.k + (targetK - start.k) * e,
           tx: start.tx + (tx - start.tx) * e,
           ty: start.ty + (ty - start.ty) * e,
-        })
+        }
+        transformRef.current = next
+        setTransform(next)
         if (u < 1) requestAnimationFrame(step)
       }
       requestAnimationFrame(step)
@@ -360,12 +360,16 @@ export default function ColumbiaNetworkGraph({ colorBy, setColorBy, data }: Prop
       if (e.ctrlKey || e.metaKey) {
         const sensitivity = 0.01
         const factor = Math.exp(-e.deltaY * sensitivity)
-        setTransform(zoomAtScreenPoint(t, lx, ly, factor, minK, maxK))
+        const next = zoomAtScreenPoint(t, lx, ly, factor, minK, maxK)
+        transformRef.current = next
+        setTransform(next)
         return
       }
       const dx = e.shiftKey ? -e.deltaY : -e.deltaX
       const dy = e.shiftKey ? 0 : -e.deltaY
-      setTransform(panByScreenDelta(t, dx, dy))
+      const panned = panByScreenDelta(t, dx, dy)
+      transformRef.current = panned
+      setTransform(panned)
     }
 
     const onPointerDown = (e: PointerEvent) => {
@@ -394,14 +398,6 @@ export default function ColumbiaNetworkGraph({ colorBy, setColorBy, data }: Prop
             return
           }
         }
-        panningRef.current = true
-        const tr = transformRef.current
-        panStartRef.current = {
-          lx: e.clientX - rect.left,
-          ly: e.clientY - rect.top,
-          tx: tr.tx,
-          ty: tr.ty,
-        }
       }
     }
 
@@ -425,11 +421,13 @@ export default function ColumbiaNetworkGraph({ colorBy, setColorBy, data }: Prop
           const wx = (midX - b.tx) / b.zoom
           const wy = (midY - b.ty) / b.zoom
           const newK = Math.min(minMaxK().maxK, Math.max(minMaxK().minK, b.zoom * (d / d0)))
-          setTransform({
+          const next = {
             k: newK,
             tx: midX - wx * newK,
             ty: midY - wy * newK,
-          })
+          }
+          transformRef.current = next
+          setTransform(next)
         }
         return
       }
@@ -444,18 +442,6 @@ export default function ColumbiaNetworkGraph({ colorBy, setColorBy, data }: Prop
         )
         return
       }
-
-      if (panningRef.current && panStartRef.current) {
-        const curLx = e.clientX - rect.left
-        const curLy = e.clientY - rect.top
-        const dx = curLx - panStartRef.current.lx
-        const dy = curLy - panStartRef.current.ly
-        setTransform({
-          k: transformRef.current.k,
-          tx: panStartRef.current.tx + dx,
-          ty: panStartRef.current.ty + dy,
-        })
-      }
     }
 
     const endPanOrPinch = (e: PointerEvent) => {
@@ -463,10 +449,6 @@ export default function ColumbiaNetworkGraph({ colorBy, setColorBy, data }: Prop
       map.delete(e.pointerId)
       if (map.size < 2) {
         pinchBaseRef.current = null
-      }
-      if (map.size === 0) {
-        panningRef.current = false
-        panStartRef.current = null
       }
     }
 
@@ -570,7 +552,7 @@ export default function ColumbiaNetworkGraph({ colorBy, setColorBy, data }: Prop
   return (
     <div className={`network-container${desktopSafariClass}`}>
       <div className="visualization-area">
-        <div ref={canvasHostRef} className="network-graph" aria-label="Network graph visualization - draggable view">
+        <div ref={canvasHostRef} className="network-graph" aria-label="Network graph visualization">
           <NetworkGraphSkia
             width={viewport.width}
             height={viewport.height}

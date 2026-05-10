@@ -99,19 +99,6 @@ path {
   }
 }
 
-.network-graph::after {
-  content: "Drag to move view";
-  position: absolute;
-  bottom: 15px;
-  left: 15px;
-  background: rgba(0,0,0,.6);
-  color: #fff;
-  border-radius: 4px;
-  font-size: 12px;
-  opacity: .7;
-  pointer-events: none;
-}
-
 @media (max-width: 600px) {
   .controls-legend-container {
     position: fixed;
