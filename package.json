@@ -11,6 +11,7 @@
     "dev": "npm run dev -w @network/web",
     "dev:server": "npm run dev -w @network/server",
     "dev:all": "concurrently \"npm run dev:server\" \"npm run dev\"",
+    "build": "npm run build:server",
     "build:web": "npm run build -w @network/web",
     "build:server": "npm run build -w @network/server"
   },
