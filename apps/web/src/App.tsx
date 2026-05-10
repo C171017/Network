@@ -492,7 +492,7 @@ export default function App() {
           <span className="app-logo-frame">
             <img
               className={`app-logo${interactivePhysics ? ' app-logo-shake' : ''}${logoBoostSpinActive ? ' app-logo-boost-spin' : ''}`}
-              src="/logo-blackback.png"
+              src={session ? '/logowhiteback.png' : '/logo-blackback.png'}
               alt=""
               style={{ ['--app-logo-spin-ms' as string]: `${Math.round(logoBoostSpinDurationMs)}ms` }}
             />
