@@ -555,6 +555,8 @@ const ZOOM_MAX_MOBILE = 1.2;
 // individual nodes anyway.
 const ZOOM_CLUSTER_THRESHOLD_DESKTOP = 0.08;
 const ZOOM_CLUSTER_THRESHOLD_MOBILE = 0.08;
+/** Below this d3-zoom scale `k` (broader / more zoomed-out view), node hover cards stay hidden. */
+const ZOOM_HOVER_INFO_MIN_K = 0.075;
 const CLUSTER_GROUP_MIN_NODES = 8;
 const CLUSTER_EXIT_HYSTERESIS = 0.02;
 const CLUSTER_EXCLUDED_COLORS = new Set(['#9e9e9e', '#999999', '#808080', 'gray', 'grey']);
@@ -585,6 +587,23 @@ function isDesktopSafariBrowser() {
 
 function getZoomClusterThreshold() {
   return isMobileViewport() ? ZOOM_CLUSTER_THRESHOLD_MOBILE : ZOOM_CLUSTER_THRESHOLD_DESKTOP;
+}
+
+function hoverInfoZoomAllowsDetailPanel(scaleK) {
+  return (Number(scaleK) || 0) >= ZOOM_HOVER_INFO_MIN_K;
+}
+
+/**
+ * At minimum zoom, nodes map to sub‑pixel on‑screen radii and hover rarely fires. Expand the
+ * invisible SVG hit target in world units (~minPx/k), capped so overlaps stay bounded.
+ */
+const NODE_HIT_MIN_SCREEN_RADIUS_PX = 14;
+const NODE_HIT_MAX_WORLD_RADIUS = NODE_RADIUS * 8;
+
+function nodeHitRadiusWorld(scaleK) {
+  const k = Math.max(Number(scaleK) || 0, 1e-9);
+  const minWorld = NODE_HIT_MIN_SCREEN_RADIUS_PX / k;
+  return Math.min(Math.max(NODE_RADIUS, minWorld), NODE_HIT_MAX_WORLD_RADIUS);
 }
 
 function shouldExcludeClusterColor(color) {
@@ -1837,10 +1856,13 @@ const NetworkGraph = ({
         const nextVisibleGroups = new Set();
         if (enableViewportGroupCulling) {
           const margin = NODE_RADIUS + 20;
+          // Extend the vertical cull boundary by 15% of viewport height so groups just
+          // off the top/bottom remain attached and don't pop in/out during small pans.
+          const verticalMargin = margin + (height * 0.15) / t.k;
           const minX = (-t.x) / t.k - margin;
           const maxX = (width - t.x) / t.k + margin;
-          const minY = (-t.y) / t.k - margin;
-          const maxY = (height - t.y) / t.k + margin;
+          const minY = (-t.y) / t.k - verticalMargin;
+          const maxY = (height - t.y) / t.k + verticalMargin;
 
           const seen = Array.from({ length: groupCount }, () => false);
           let seenCount = 0;
@@ -1922,6 +1944,15 @@ const NetworkGraph = ({
         height,
         (transform, zoomPhase) => {
           currentTransform = transform;
+          svg.selectAll('g.node circle.node-hit').attr('r', nodeHitRadiusWorld(transform.k));
+          const hoverEl = hoverStatusRef.current;
+          if (
+            hoverEl
+            && hoverEl.style.display !== 'none'
+            && !hoverInfoZoomAllowsDetailPanel(transform.k)
+          ) {
+            hoverEl.style.display = 'none';
+          }
           applyGroupCulling();
           if (zoomPhase === 'end') {
             cancelScheduledUiSurfaceThemeFromZoom();
@@ -2021,7 +2052,7 @@ const NetworkGraph = ({
         node
           .on('mouseover', (event, d) => {
             const el = hoverStatusRef.current;
-            if (!el) return;
+            if (!el || !hoverInfoZoomAllowsDetailPanel(currentTransform.k)) return;
             renderNodeHoverPanel(el, d);
             el.style.display = 'block';
             placeHoverNearPointerNow(event);
@@ -2029,6 +2060,10 @@ const NetworkGraph = ({
           .on('mousemove', (event) => {
             const el = hoverStatusRef.current;
             if (!el || el.style.display === 'none') return;
+            if (!hoverInfoZoomAllowsDetailPanel(currentTransform.k)) {
+              el.style.display = 'none';
+              return;
+            }
             scheduleHoverNearPointerMove(event);
           })
           .on('mouseout', (event) => {
@@ -2191,6 +2226,12 @@ const NetworkGraph = ({
           .attr('fill', 'none')
           .attr('pointer-events', 'none')
           .style('display', 'none');
+
+        nodeGroup
+          .append('circle')
+          .attr('class', 'node-hit')
+          .attr('r', nodeHitRadiusWorld(currentTransform.k))
+          .attr('aria-hidden', 'true');
       });
 
       // Keep node centers inside the draggable inner disk
@@ -2482,6 +2523,12 @@ const NetworkGraph = ({
               .attr('fill', 'none')
               .attr('pointer-events', 'none')
               .style('display', 'none');
+
+            nodeGroup
+              .append('circle')
+              .attr('class', 'node-hit')
+              .attr('r', nodeHitRadiusWorld(currentTransform.k))
+              .attr('aria-hidden', 'true');
           });
 
           ndEnter
@@ -2579,7 +2626,7 @@ const NetworkGraph = ({
             ndEnter
               .on('mouseover', (event, d) => {
                 const el = hoverStatusRef.current;
-                if (!el) return;
+                if (!el || !hoverInfoZoomAllowsDetailPanel(currentTransform.k)) return;
                 renderNodeHoverPanel(el, d);
                 el.style.display = 'block';
                 placeHoverNearPointerNow(event);
@@ -2587,6 +2634,10 @@ const NetworkGraph = ({
               .on('mousemove', (event) => {
                 const el = hoverStatusRef.current;
                 if (!el || el.style.display === 'none') return;
+                if (!hoverInfoZoomAllowsDetailPanel(currentTransform.k)) {
+                  el.style.display = 'none';
+                  return;
+                }
                 scheduleHoverNearPointerMove(event);
               })
               .on('mouseout', (event) => {
@@ -2762,7 +2813,7 @@ const NetworkGraph = ({
 
       nodeGroup.select('g.node-visual').remove();
       nodeGroup
-        .selectAll('path, image, defs, circle:not(.long-press-ring)')
+        .selectAll('path, image, defs, circle:not(.long-press-ring):not(.node-hit)')
         .remove();
       const nodePathInfo = createNodePath(d);
       renderNodeVisual(nodeGroup, d, nodePathInfo, {
@@ -2780,7 +2831,20 @@ const NetworkGraph = ({
           .attr('pointer-events', 'none')
           .style('display', 'none');
       }
+      if (nodeGroup.select('.node-hit').empty()) {
+        nodeGroup
+          .append('circle')
+          .attr('class', 'node-hit')
+          .attr('r', nodeHitRadiusWorld(d3.zoomTransform(svgRef.current).k))
+          .attr('aria-hidden', 'true');
+      }
     });
+
+    const svgEl = svgRef.current;
+    if (svgEl) {
+      const r = nodeHitRadiusWorld(d3.zoomTransform(svgEl).k);
+      d3.select(svgEl).selectAll('g.node circle.node-hit').attr('r', r);
+    }
 
     g.selectAll('.cluster').each(function redrawClusterDatum() {
       const clusterSel = d3.select(this);

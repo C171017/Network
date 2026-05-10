@@ -18,6 +18,8 @@ import './App.css'
 const LOGO_PHYSICS_PRESS_MS = 380
 /** After physics (shake) is on, hold this long before the auth spin ramp can begin. */
 const LOGO_PHYSICS_DWELL_BEFORE_AUTH_MS = 1100
+/** Wait this long after a logo click before treating it as a single click (so double-click can mean fullscreen). */
+const LOGO_SINGLE_CLICK_WINDOW_MS = 10
 
 /** Easter egg: single-click the logo this many times (across signed-in/public) to play Pink Moon. */
 const LOGO_PINK_MOON_CLICK_THRESHOLD = 10
@@ -33,6 +35,53 @@ type SessionInfo = {
 /** Persisted across the GitHub OAuth redirect so a long-press crawl can resume after sign-in. */
 const PENDING_CRAWL_KEY = 'network:pendingCrawlLogin'
 const DEFAULT_PUBLIC_INITIAL_MAX_NODES = 200
+
+function getFullscreenElement(): Element | null {
+  const d = document as Document & {
+    webkitFullscreenElement?: Element | null
+    mozFullScreenElement?: Element | null
+    msFullscreenElement?: Element | null
+  }
+  return (
+    document.fullscreenElement ??
+    d.webkitFullscreenElement ??
+    d.mozFullScreenElement ??
+    d.msFullscreenElement ??
+    null
+  )
+}
+
+async function toggleBrowserFullscreen(): Promise<void> {
+  const doc = document as Document & {
+    webkitExitFullscreen?: () => Promise<void>
+    mozCancelFullScreen?: () => Promise<void>
+    msExitFullscreen?: () => Promise<void>
+  }
+  const root = document.documentElement as HTMLElement & {
+    webkitRequestFullscreen?: () => Promise<void>
+    mozRequestFullScreen?: () => Promise<void>
+    msRequestFullscreen?: () => Promise<void>
+  }
+
+  try {
+    if (getFullscreenElement()) {
+      if (document.exitFullscreen) await document.exitFullscreen()
+      else if (doc.webkitExitFullscreen) await doc.webkitExitFullscreen()
+      else if (doc.mozCancelFullScreen) doc.mozCancelFullScreen()
+      else if (doc.msExitFullscreen) doc.msExitFullscreen()
+    } else if (root.requestFullscreen) {
+      await root.requestFullscreen()
+    } else if (root.webkitRequestFullscreen) {
+      await root.webkitRequestFullscreen()
+    } else if (root.mozRequestFullScreen) {
+      await root.mozRequestFullScreen()
+    } else if (root.msRequestFullscreen) {
+      root.msRequestFullscreen()
+    }
+  } catch {
+    /* NotAllowedError, unsupported environment, orFullscreen API denied */
+  }
+}
 
 function readPublicInitialMaxNodes(): number {
   const raw = import.meta.env.VITE_PUBLIC_INITIAL_MAX_NODES
@@ -118,6 +167,8 @@ export default function App() {
   const [focusAuthNodeNonce, setFocusAuthNodeNonce] = useState(0)
   const sessionRef = useRef<SessionInfo | null>(null)
   const logoClickCountRef = useRef(0)
+  const logoClickBurstRef = useRef(0)
+  const logoSingleClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pinkMoonAudioRef = useRef<HTMLAudioElement | null>(null)
 
   useEffect(() => {
@@ -201,6 +252,10 @@ export default function App() {
         window.cancelAnimationFrame(logoSpinRafRef.current)
         logoSpinRafRef.current = null
       }
+      if (logoSingleClickTimerRef.current != null) {
+        window.clearTimeout(logoSingleClickTimerRef.current)
+        logoSingleClickTimerRef.current = null
+      }
     }
   }, [])
 
@@ -212,6 +267,13 @@ export default function App() {
     if (logoAuthDwellTimerRef.current != null) {
       window.clearTimeout(logoAuthDwellTimerRef.current)
       logoAuthDwellTimerRef.current = null
+    }
+  }
+
+  function clearLogoSingleClickTimer() {
+    if (logoSingleClickTimerRef.current != null) {
+      window.clearTimeout(logoSingleClickTimerRef.current)
+      logoSingleClickTimerRef.current = null
     }
   }
 
@@ -330,11 +392,31 @@ export default function App() {
     if (logoSuppressClickRef.current) {
       logoSuppressClickRef.current = false
       e.preventDefault()
+      clearLogoSingleClickTimer()
+      logoClickBurstRef.current = 0
       return
     }
-    maybePlayPinkMoon()
-    if (!sessionRef.current) return
-    setFocusAuthNodeNonce((n) => n + 1)
+    logoClickBurstRef.current += 1
+    if (logoClickBurstRef.current === 1) {
+      clearLogoSingleClickTimer()
+      logoSingleClickTimerRef.current = window.setTimeout(() => {
+        logoSingleClickTimerRef.current = null
+        const n = logoClickBurstRef.current
+        logoClickBurstRef.current = 0
+        if (n === 1) {
+          maybePlayPinkMoon()
+          if (!sessionRef.current) return
+          setFocusAuthNodeNonce((x) => x + 1)
+        }
+      }, LOGO_SINGLE_CLICK_WINDOW_MS)
+    }
+  }
+
+  function onLogoDoubleClick(e: React.MouseEvent<HTMLButtonElement>) {
+    e.preventDefault()
+    clearLogoSingleClickTimer()
+    logoClickBurstRef.current = 0
+    void toggleBrowserFullscreen()
   }
 
   const [bootPhase, setBootPhase] = useState<'pulse' | 'fadeOut' | 'idle'>('pulse')
@@ -509,12 +591,13 @@ export default function App() {
             stopLogoSpinRamp()
           }}
           onClick={onLogoClick}
+          onDoubleClick={onLogoDoubleClick}
           aria-label={
             interactivePhysics
-              ? 'Drag physics on. Press and hold to turn off.'
+              ? 'Drag physics on. Press and hold to turn off. Double-click to toggle full screen.'
               : !session
-                ? 'Hold to turn on drag physics, keep holding while it shakes, then keep holding until sign-in completes.'
-                : 'Hold to turn on drag physics, keep holding while it shakes, then keep holding until sign-out completes.'
+                ? 'Hold to turn on drag physics, keep holding while it shakes, then keep holding until sign-in completes. Double-click to toggle full screen.'
+                : 'Hold to turn on drag physics, keep holding while it shakes, then keep holding until sign-out completes. Double-click to toggle full screen.'
           }
         >
           <span className="app-logo-frame">
@@ -556,7 +639,6 @@ export default function App() {
           <div className="app-boot-veil__glow" />
         </div>
       ) : null}
-
     </div>
   )
 }

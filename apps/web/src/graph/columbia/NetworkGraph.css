@@ -56,6 +56,13 @@
   z-index: 2;
 }
 
+/* Expanded invisible target when zoomed out — keeps hover/drag usable (see nodeHitRadiusWorld). */
+.network-graph g.node circle.node-hit {
+  fill: rgba(0, 0, 0, 0.02);
+  stroke: none;
+  pointer-events: all;
+}
+
 .graph-hover-status {
   position: fixed;
   left: 0;
