@@ -27,7 +27,8 @@ import {
   LINK_FORCE_STRENGTH,
   LONG_PRESS_MOVE_CANCEL_PX,
   LONG_PRESS_MS,
-  NODE_RADIUS
+  NODE_RADIUS,
+  NODE_SINGLE_CLICK_DELAY_MS
 } from './graphConstants';
 ////////////////////////////////////////////
 ////////////////////////////////////////////
@@ -1996,7 +1997,7 @@ const NetworkGraph = ({
           if (interactivePhysicsRef.current && currentHighlight == null) {
             stopGroupMiniSimFully();
           }
-        }, 280);
+        }, NODE_SINGLE_CLICK_DELAY_MS);
       });
 
       node.on('dblclick', (event, d) => {
@@ -2558,7 +2559,7 @@ const NetworkGraph = ({
                 if (interactivePhysicsRef.current && currentHighlight == null) {
                   stopGroupMiniSimFully();
                 }
-              }, 280);
+              }, NODE_SINGLE_CLICK_DELAY_MS);
             })
             .on('dblclick', (event, d) => {
               event.preventDefault();

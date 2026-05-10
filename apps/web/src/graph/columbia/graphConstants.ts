@@ -27,6 +27,13 @@ export const LINK_WEDGE_SOURCE_HALF_WIDTH = 2.4
 export const LINK_WEDGE_TARGET_HALF_WIDTH = 0.3
 export const LINK_WEDGE_MUTUAL_OFFSET = 6
 
+/**
+ * After a click, wait this long before running the single-click action (group focus).
+ * Must be ≥ the OS double-click interval (often ~500ms on Windows defaults), otherwise
+ * the first click of a double-click can toggle focus before `dblclick` fires.
+ */
+export const NODE_SINGLE_CLICK_DELAY_MS = 500
+
 /** Hold duration (ms) on a node before it triggers a crawl from that node. */
 export const LONG_PRESS_MS = 800
 /** Pointer movement (px) during a long-press that cancels it (treated as drag/pan instead). */
