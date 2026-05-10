@@ -1,4 +1,5 @@
 // Columbia D3 graph port — strict typing deferred (large d3/simulation surface).
+// Dummy comment for push test.
 // @ts-nocheck
 
 ////////////////////////////////////////////
