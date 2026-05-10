@@ -565,9 +565,9 @@ const ZOOM_CLUSTER_THRESHOLD_MOBILE = 0.08;
 const CLUSTER_GROUP_MIN_NODES = 8;
 const CLUSTER_EXIT_HYSTERESIS = 0.02;
 const CLUSTER_EXCLUDED_COLORS = new Set(['#9e9e9e', '#999999', '#808080', 'gray', 'grey']);
-// Keep all groups visually present in normal mode so expands feel additive.
-// Cluster mode still handles far-zoom performance reduction.
-const ENABLE_VIEWPORT_GROUP_CULLING = false;
+// Viewport-cull distant groups (DOM + freeze offscreen physics) for performance.
+// Cluster mode still handles far-zoom reduction; groups reattach as they pan into view.
+const ENABLE_VIEWPORT_GROUP_CULLING = true;
 
 /** Skip full-screen link glow rasterization beyond this node count (desktop chrome only). */
 const LINK_GLOW_MAX_NODES = 420;
