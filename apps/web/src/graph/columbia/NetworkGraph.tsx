@@ -249,12 +249,8 @@ function buildColorClusterCircles(groupNodes, getNodeColor, groupCenter) {
     const area = Math.max(MIN_CLUSTER_AREA, Math.PI * radius * radius);
     const density = nodes.length / area;
 
-    const avatarUrl =
-      nodes.map((n) => String(n.avatarUrl ?? '').trim()).find((s) => s.length > 0) ?? '';
-
     circles.push({
       color,
-      avatarUrl,
       count: nodes.length,
       cx: midX - groupCenter.x,
       cy: midY - groupCenter.y,
