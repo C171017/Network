@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import './Legend.css'
-import { COLOR_PALETTE } from './colorPalette'
+import { getCategoricalColor } from './colorPalette'
 import { extractNodeValues, getColorableFieldKeys } from './fieldMetadata'
 
 type LegendItem = { color: string; label: string; isDashed?: boolean }
@@ -19,7 +19,7 @@ export default function Legend({ colorBy, data, darkSurface = false }: Props) {
     const toLegend = (key: string): LegendItem[] => {
       const uniq = [...new Set(nodes.flatMap((n) => extractNodeValues(n, key)))]
       return uniq.map((v, i) => ({
-        color: COLOR_PALETTE[i % COLOR_PALETTE.length]!,
+        color: getCategoricalColor(i),
         label: v,
       }))
     }

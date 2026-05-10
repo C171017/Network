@@ -451,6 +451,7 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
     let handleGlobalDragRelease = null;
     let simulation = null;
     let groupMiniSimInstance = null;
+    let nodeClickTimer = null;
     /** Assigned inside try once helpers exist; cleanup always calls a safe no-op if render failed. */
     let teardownGroupMiniSimOnly = () => {};
     try {
@@ -1220,16 +1221,30 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
           suppressNextClick = false;
           return;
         }
-        const grp = groupMap.get(d.id);
-        // toggle on/off
-        currentHighlight = (currentHighlight === grp ? null : grp);
+        if (nodeClickTimer) clearTimeout(nodeClickTimer);
+        nodeClickTimer = setTimeout(() => {
+          nodeClickTimer = null;
+          const grp = groupMap.get(d.id);
+          currentHighlight = (currentHighlight === grp ? null : grp);
+          applyViewportHighlightClasses();
+          if (currentHighlight == null) {
+            stopGroupMiniSimFully();
+          }
+        }, 280);
+      });
 
-        // Highlight/dim only nodes & links in viewport-visible groups (see applyGroupCulling).
-        applyViewportHighlightClasses();
-
-        // Click only toggles focus/highlight; in-group expansion runs while dragging (hold).
-        if (currentHighlight == null) {
-          stopGroupMiniSimFully();
+      node.on('dblclick', (event, d) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (nodeClickTimer) {
+          clearTimeout(nodeClickTimer);
+          nodeClickTimer = null;
+        }
+        const raw = d.profileUrl != null ? String(d.profileUrl).trim() : '';
+        const url =
+          raw.length > 0 ? raw : `https://github.com/${encodeURIComponent(String(d.login ?? ''))}`;
+        if (url.length > 0) {
+          window.open(url, '_blank', 'noopener,noreferrer');
         }
       });
 
@@ -1342,6 +1357,7 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
                 .find((value) => value !== '') || 'N/A';
               let html = `<h4>ID: ${d.id}</h4>`;
               html += `<p><strong>Major:</strong> ${major}</p>`;
+              html += `<p style="opacity:0.75;font-size:0.85em;margin-top:6px;">Double-click to open GitHub profile</p>`;
 
               tooltip
                 .html(html)
@@ -1463,6 +1479,10 @@ const NetworkGraph = ({ colorBy, setColorBy, data }) => {
     }
 
     return () => {
+      if (nodeClickTimer != null) {
+        clearTimeout(nodeClickTimer);
+        nodeClickTimer = null;
+      }
       if (handleGlobalDragRelease) {
         window.removeEventListener('mouseup', handleGlobalDragRelease, true);
         window.removeEventListener('blur', handleGlobalDragRelease);

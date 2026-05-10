@@ -1,4 +1,4 @@
-import { COLOR_PALETTE } from './colorPalette'
+import { getCategoricalColor } from './colorPalette'
 import { extractNodeValues, getColorableFieldKeys } from './fieldMetadata'
 
 export function buildColorMaps(nodes: Record<string, unknown>[] = []): Record<string, Record<string, string>> {
@@ -10,7 +10,7 @@ export function buildColorMaps(nodes: Record<string, unknown>[] = []): Record<st
       if (!vals.length) return
       maps[key] = {}
       vals.forEach((v, i) => {
-        maps[key]![v] = COLOR_PALETTE[i % COLOR_PALETTE.length]!
+        maps[key]![v] = getCategoricalColor(i)
       })
     })
   return maps

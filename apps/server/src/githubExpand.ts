@@ -1,10 +1,11 @@
 import type { Database } from "better-sqlite3";
+import { githubProfilePageUrl } from "./githubProfileUrl.js";
 import type { EdgeDTO, GraphDTO, NodeDTO } from "./graphTypes.js";
 import { persistFollowsEdge, persistNode, type NodeRowInput } from "./graphStore.js";
 
 const API = "https://api.github.com";
 
-/** First `per_page` page of “following” (GitHub order ≈ recently followed first). */
+/** First `per_page` page per side (following / followers); GitHub order ≈ recent first. */
 export const DEFAULT_FOLLOWING_BRANCH = 5;
 /** Expand nodes at depths 0 … maxHopDepth - 1; deepest discovered users sit at `maxHopDepth`. */
 export const DEFAULT_MAX_HOP_DEPTH = 3;
@@ -31,7 +32,7 @@ function toNode(user: GithubUserApi, isRoot: boolean, depth: number, expanded: 0
     company: user.company ?? null,
     location: user.location ?? null,
     websiteUrl: user.blog ?? null,
-    profileUrl: user.html_url,
+    profileUrl: githubProfilePageUrl(user.login, user.html_url),
     isRoot,
     depth,
     expanded,
@@ -82,20 +83,33 @@ async function listFollowingFirstN(token: string, login: string, n: number): Pro
   return chunk.slice(0, n);
 }
 
+async function listFollowersFirstN(token: string, login: string, n: number): Promise<GithubUserApi[]> {
+  const chunk = await ghFetch<GithubUserApi[]>(
+    token,
+    `/users/${encodeURIComponent(login)}/followers?per_page=${n}&page=1`,
+  );
+  return chunk.slice(0, n);
+}
+
 /**
- * BFS on **following** only: from the root, take the first `branchPerNode` followees per user,
- * up to graph hop depth `maxHopDepth` (root at 0). Each discovered node and directed `follows`
- * edge is appended to SQLite (`nodes`, `edges`) for accumulation across requests.
+ * BFS using **both** directions per user: up to `branchFollowing` accounts they follow (outgoing)
+ * and up to `branchFollowers` followers (incoming). Edges stay canonical: `source → target` means
+ * source follows target. Depth is hop count from the root in this mixed graph. All nodes and
+ * edges are written to SQLite (`nodes`, `edges`) for accumulation across requests.
  */
 export async function expandFollowingDepthGraph(params: {
   token: string;
   rootLogin: string;
   db: Database;
-  branchPerNode?: number;
+  /** Cap on outgoing “following” fetches per expanded user. */
+  branchFollowing?: number;
+  /** Cap on incoming “followers” fetches per expanded user (defaults to `branchFollowing`). */
+  branchFollowers?: number;
   maxHopDepth?: number;
 }): Promise<GraphDTO> {
   const { token, rootLogin, db } = params;
-  const branchPerNode = params.branchPerNode ?? DEFAULT_FOLLOWING_BRANCH;
+  const branchFollowing = params.branchFollowing ?? DEFAULT_FOLLOWING_BRANCH;
+  const branchFollowers = params.branchFollowers ?? branchFollowing;
   const maxHopDepth = params.maxHopDepth ?? DEFAULT_MAX_HOP_DEPTH;
 
   const rootUser = await ghFetch<GithubUserApi>(token, `/users/${encodeURIComponent(rootLogin)}`);
@@ -106,11 +120,23 @@ export async function expandFollowingDepthGraph(params: {
   nodeById.set(rootNode.githubId, rootNode);
 
   const edges: EdgeDTO[] = [];
+  const edgeKeySeen = new Set<string>();
 
   const queue: Array<{ id: number; login: string; depth: number }> = [
     { id: rootNode.githubId, login: rootNode.login, depth: 0 },
   ];
   const expandedIds = new Set<number>();
+
+  let followingReturned = 0;
+  let followersReturned = 0;
+
+  function addFollowsEdge(sourceId: number, targetId: number): void {
+    const key = `${sourceId}->${targetId}`;
+    if (edgeKeySeen.has(key)) return;
+    edgeKeySeen.add(key);
+    persistFollowsEdge(db, sourceId, targetId);
+    edges.push({ sourceGithubId: sourceId, targetGithubId: targetId, kind: "follows" });
+  }
 
   while (queue.length > 0) {
     const u = queue.shift()!;
@@ -118,7 +144,10 @@ export async function expandFollowingDepthGraph(params: {
     if (expandedIds.has(u.id)) continue;
     expandedIds.add(u.id);
 
-    const following = await listFollowingFirstN(token, u.login, branchPerNode);
+    const [following, followers] = await Promise.all([
+      listFollowingFirstN(token, u.login, branchFollowing),
+      listFollowersFirstN(token, u.login, branchFollowers),
+    ]);
 
     const parentDto = nodeById.get(u.id)!;
     persistNode(db, toNodeRow(parentDto, u.depth, 1));
@@ -129,21 +158,32 @@ export async function expandFollowingDepthGraph(params: {
       const child = isNew ? toNode(raw, false, u.depth + 1, 0) : nodeById.get(raw.id)!;
       if (isNew) nodeById.set(child.githubId, child);
       persistNode(db, toNodeRow(child, u.depth + 1, 0));
-      persistFollowsEdge(db, u.id, child.githubId);
-      edges.push({ sourceGithubId: u.id, targetGithubId: child.githubId, kind: "follows" });
+      addFollowsEdge(u.id, child.githubId);
+      followingReturned++;
       queue.push({ id: child.githubId, login: child.login, depth: u.depth + 1 });
+    }
+
+    for (const raw of followers) {
+      // GitHub: raw is a follower of u → raw follows u
+      const isNew = !nodeById.has(raw.id);
+      const follower = isNew ? toNode(raw, false, u.depth + 1, 0) : nodeById.get(raw.id)!;
+      if (isNew) nodeById.set(follower.githubId, follower);
+      persistNode(db, toNodeRow(follower, u.depth + 1, 0));
+      addFollowsEdge(follower.githubId, u.id);
+      followersReturned++;
+      queue.push({ id: follower.githubId, login: follower.login, depth: u.depth + 1 });
     }
   }
 
   return {
     rootLogin: rootNode.login,
     generatedAt: new Date().toISOString(),
-    caps: { maxFollowers: 0, maxFollowing: branchPerNode },
+    caps: { maxFollowers: branchFollowers, maxFollowing: branchFollowing },
     truncation: {
       followersTotal: null,
       followingTotal: null,
-      followersReturned: 0,
-      followingReturned: edges.length,
+      followersReturned,
+      followingReturned,
     },
     nodes: [...nodeById.values()],
     edges,

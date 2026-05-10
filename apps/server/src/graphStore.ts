@@ -23,6 +23,7 @@ export function openGraphDatabase(dbPath: string): Database.Database {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
 
+  /* nodes.blog = user website from GitHub; nodes.html_url = GitHub profile page (https://github.com/...). */
   db.exec(`
     CREATE TABLE IF NOT EXISTS nodes (
       github_id INTEGER PRIMARY KEY,

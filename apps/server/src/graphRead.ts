@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { githubProfilePageUrl } from "./githubProfileUrl.js";
 import type { EdgeDTO, GraphDTO, NodeDTO } from "./graphTypes.js";
 
 const DEFAULT_MAX_NODES = 8000;
@@ -40,7 +41,7 @@ function rowToNode(row: NodeRow, isRoot: boolean): NodeDTO {
     company: row.company,
     location: row.location,
     websiteUrl: row.blog,
-    profileUrl: row.html_url ?? "",
+    profileUrl: githubProfilePageUrl(row.login, row.html_url),
     isRoot,
     depth: row.depth,
     expanded: row.expanded ? 1 : 0,

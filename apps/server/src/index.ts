@@ -138,7 +138,7 @@ app.post("/api/graph/expand", async (c) => {
     return c.json({ error: "unauthorized", message: userErr?.message ?? "Invalid session" }, 401);
   }
 
-  let body: { rootLogin?: string; maxFollowing?: number };
+  let body: { rootLogin?: string; maxFollowing?: number; maxFollowers?: number };
   try {
     body = await c.req.json();
   } catch {
@@ -150,14 +150,16 @@ app.post("/api/graph/expand", async (c) => {
     return c.json({ error: "bad_request", message: "rootLogin is required" }, 400);
   }
 
-  const branchPerNode = Math.min(Math.max(body.maxFollowing ?? 5, 1), 20);
+  const branchFollowing = Math.min(Math.max(body.maxFollowing ?? 5, 1), 20);
+  const branchFollowers = Math.min(Math.max(body.maxFollowers ?? body.maxFollowing ?? 5, 1), 20);
 
   try {
     const graph = await expandFollowingDepthGraph({
       token: githubToken,
       rootLogin,
       db: graphDb,
-      branchPerNode,
+      branchFollowing,
+      branchFollowers,
     });
     return c.json(graph);
   } catch (e) {
