@@ -2,9 +2,19 @@
   "name": "network-monorepo",
   "private": true,
   "workspaces": [
-    "packages/crawler"
+    "packages/crawler",
+    "apps/web",
+    "apps/server"
   ],
   "scripts": {
-    "crawl": "npm run crawl -w @network/crawler"
+    "crawl": "npm run crawl -w @network/crawler",
+    "dev": "npm run dev -w @network/web",
+    "dev:server": "npm run dev -w @network/server",
+    "dev:all": "concurrently \"npm run dev:server\" \"npm run dev\"",
+    "build:web": "npm run build -w @network/web",
+    "build:server": "npm run build -w @network/server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
   }
 }

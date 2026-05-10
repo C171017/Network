@@ -11,32 +11,32 @@
 
 Mirrors the checklist in `docs/humans/08-chosen-tech-stack.md`; keep one source updated.
 
-- [ ] Supabase project created; GitHub Auth provider enabled; OAuth callback URLs set
-- [ ] GitHub OAuth credentials configured (per Supabase + GitHub docs)
-- [ ] `.env` / `.env.example` wired for `DATABASE_URL`, Supabase keys, and any server secrets (`chosen-tech-stack.md`)
-- [ ] Vite + React + TypeScript app runs locally (`apps/web` or equivalent)
-- [ ] Node API server runs locally and is reachable from the web app (proxy or explicit API base URL)
-- [ ] Prisma (or Drizzle) connects to Supabase; first migration applied (pooler vs direct URL per `chosen-tech-stack.md`)
-- [ ] Sign-in flow completes in the browser; user visible in Supabase **Authentication** dashboard
+- [x] Supabase project + keys wired in **`apps/web/.env`** (`VITE_*`) and **`apps/server/.env`** (`SUPABASE_*`)
+- [x] GitHub OAuth App callback → Supabase; GitHub provider enabled in Supabase dashboard
+- [x] `.env.example` files under `apps/web` and `apps/server`; real `.env` files gitignored
+- [x] Vite + React + TypeScript app runs locally (`apps/web`)
+- [x] Hono API runs locally (`apps/server`); Vite dev proxy `/api` → `:8787`
+- [ ] Prisma (or Drizzle) + `DATABASE_URL` migrations (optional for first graph slice)
+- [x] Sign-in flow in browser; user visible in Supabase **Authentication** when configured
 
 ## Phase D1 — Scaffold
 
-- [ ] Repo boots locally; lint/format baseline
-- [ ] Env template documented in root README
-- [ ] GitHub OAuth works to completion (callback → session)
+- [x] Repo boots locally (`npm install`, `npm run dev` / `dev:server` / `dev:all`)
+- [x] Env templates + root README document variable names
+- [x] GitHub OAuth via Supabase completes (callback → session)
 
 ## Phase D2 — Expand API
 
-- [ ] `POST /api/graph/expand` returns valid `GraphDTO` for test user
-- [ ] Caps enforced; truncation counts in DTO
-- [ ] Errors mapped to stable client shape `{ code, message, retryAfter? }`
+- [x] `POST /api/graph/expand` returns `GraphDTO` (star graph: root + followers + following, capped)
+- [x] Caps enforced server-side (`maxFollowers` / `maxFollowing`)
+- [ ] Errors mapped consistently to `{ code, message, retryAfter? }` (currently plain JSON errors)
 
 ## Phase D3 — UI
 
-- [ ] Graph renders from DTO
-- [ ] Node selection shows panel
-- [ ] Actions: re-root, explore by username
-- [ ] Rate limit / error UI
+- [x] Graph renders from DTO (`react-force-graph-2d`)
+- [ ] Node selection + side panel (not built yet)
+- [x] Explore by username via **Root GitHub login** input + load
+- [ ] Dedicated rate-limit / retry UI (errors surface as banner text today)
 
 ## Phase D4 — Demo hardening
 
@@ -46,7 +46,7 @@ Mirrors the checklist in `docs/humans/08-chosen-tech-stack.md`; keep one source 
 
 ## Acceptance criteria (hackathon)
 
-1. Fresh clone → `.env` → `pnpm dev` (or chosen PM) → demo works.
+1. Fresh clone → `apps/web/.env` + `apps/server/.env` → `npm run dev:all` (or `dev` + `dev:server`) → demo works.
 2. Two distinct GitHub users expandable without server crash.
 3. Caps visible in UI or easily explainable verbally.
 

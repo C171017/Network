@@ -31,3 +31,5 @@ This repository splits documentation into two parallel trees so hackathon work s
 ## Hackathon time budget (rough)
 
 Assume ~13 hours of build time if ~5 hours are sleep or travel. Docs here assume **documentation first**, then a **vertical slice**: login → seed graph from “me” → limited expansion → interactive graph → “set as root” / “explore by username”.
+
+**Implemented slice:** see root [`README.md`](../README.md) — Vite web + Hono API + Supabase GitHub OAuth + `react-force-graph-2d`; local env under `apps/web/.env` and `apps/server/.env`.

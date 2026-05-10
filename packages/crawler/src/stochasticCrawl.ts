@@ -3,7 +3,7 @@ import { GithubRestClient, GithubRateLimitError } from "./githubRest.js";
 import { sampleRandomFirstDegreeNeighbors } from "./sampleNeighbors.js";
 import {
   openStore,
-  upsertSlimNode,
+  insertSlimNodeIfMissing,
   markExpandedFullProfile,
   insertFollowsEdge,
 } from "./sqliteStore.js";
@@ -81,7 +81,7 @@ export async function runStochasticCrawl(
 
       for (const pick of picks) {
         const v = pick.user;
-        upsertSlimNode(db, v, depth + 1);
+        insertSlimNodeIfMissing(db, v, depth + 1);
         stats.edgesUpserted += applyEdges(db, subject.id, v.id, pick.edge);
 
         const nextDepth = depth + 1;

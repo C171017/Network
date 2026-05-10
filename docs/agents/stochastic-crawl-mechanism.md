@@ -42,6 +42,13 @@ Steps:
 - **Runtime:** GitHub JSON → normalized rows in **SQLite** (`nodes`, `edges`).
 - **Same mechanism in production:** swap SQLite for **Postgres** JSONB snapshots or relational tables using the same columns.
 
+## Accumulating runs (no wipe by default)
+
+- Omit `RESET_DB` so the SQLite file **grows over time** across multiple crawls.
+- **Duplicate users** discovered again as slim neighbors: **ignored** (`INSERT OR IGNORE` on `github_id`).
+- **Duplicate edges**: **ignored** (`INSERT OR IGNORE` on primary key).
+- `RESET_DB=1` is only for intentional “empty the DB before this run” demos.
+
 ## Related implementation
 
 - Package: [`packages/crawler/README.md`](../../packages/crawler/README.md)

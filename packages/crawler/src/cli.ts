@@ -1,4 +1,15 @@
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import dotenv from "dotenv";
 import { runStochasticCrawl } from "./stochasticCrawl.js";
+
+for (const dir of [process.cwd(), resolve(process.cwd(), ".."), resolve(process.cwd(), "..", "..")]) {
+  const p = resolve(dir, ".env");
+  if (existsSync(p)) {
+    dotenv.config({ path: p });
+    break;
+  }
+}
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name];

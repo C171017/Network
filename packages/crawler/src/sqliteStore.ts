@@ -46,19 +46,19 @@ export function openStore(dbPath: string, options?: OpenStoreOptions): Database.
   return db;
 }
 
-export function upsertSlimNode(
+/**
+ * Inserts a “slim” neighbor row. If this `github_id` already exists, **does nothing**
+ * so the database **accumulates** across runs and first-seen rows win.
+ */
+export function insertSlimNodeIfMissing(
   db: Database.Database,
   user: GithubUserSlim,
   depth: number,
 ): void {
   const now = new Date().toISOString();
   const stmt = db.prepare(`
-    INSERT INTO nodes (github_id, login, depth, expanded, avatar_url, updated_at)
+    INSERT OR IGNORE INTO nodes (github_id, login, depth, expanded, avatar_url, updated_at)
     VALUES (@github_id, @login, @depth, 0, @avatar_url, @updated_at)
-    ON CONFLICT(github_id) DO UPDATE SET
-      depth = MIN(nodes.depth, excluded.depth),
-      avatar_url = COALESCE(excluded.avatar_url, nodes.avatar_url),
-      updated_at = excluded.updated_at
   `);
   stmt.run({
     github_id: user.id,

@@ -27,8 +27,8 @@ flowchart LR
 
 | Component | Responsibility |
 |-----------|----------------|
-| **Auth** | OAuth code exchange; session cookie; attach GitHub access token server-side (encrypted or in DB), never to localStorage if avoidable |
-| **Expand service** | Given `rootLogin` and caps, return `GraphDTO` (nodes + edges), merging duplicates by GitHub user id |
+| **Auth** | **Supabase Auth** (GitHub OAuth in browser); API verifies **`Authorization: Bearer <supabase_access_token>`**; browser sends **`X-GitHub-Access-Token`** (`session.provider_token`) for GitHub REST (hackathon bridge — tighten later) |
+| **Expand service** | `POST /api/graph/expand`: given `rootLogin` + caps, return **`GraphDTO`** (star graph; nodes + directed `follows` edges) |
 | **GitHub client** | Pagination loops, backoff on `403` rate limit, typed errors |
 | **Graph renderer** | Layout, interaction, tooltips; **no** direct GitHub calls |
 
@@ -43,11 +43,14 @@ Frozen-ish for codegen; adjust names to match framework.
 ```json
 {
   "rootLogin": "octocat",
-  "maxFollowers": 100,
-  "maxFollowing": 100,
-  "includeRootProfile": true
+  "maxFollowers": 80,
+  "maxFollowing": 80
 }
 ```
+
+Headers: `Authorization: Bearer <supabase_jwt>`, `X-GitHub-Access-Token: <github_oauth_token>`.
+
+(`includeRootProfile` is not used in the shipped handler; root profile is always included.)
 
 **Response:** `GraphDTO` (see `data-model-and-github-mapping.md`).
 

@@ -10,7 +10,7 @@ This is the **human-readable** summary. Implementation details, environment vari
 | **Database** | **Supabase** (managed **PostgreSQL**) |
 | **Talking to SQL** | **Prisma** (recommended) or **Drizzle** — use an ORM first so you ship with TypeScript types and migrations; learn raw SQL in parallel |
 | **Auth** | **Supabase Auth** with the **GitHub** provider (same “sign in with GitHub” story; tokens stay server-aware via Supabase’s session model — see agent doc) |
-| **API shape** | A **small backend** next to the Vite app (not “GitHub from the browser”) for `POST /api/graph/expand` and any privileged work — exact runtime is in the agent doc |
+| **API shape** | **`apps/server`** — **Hono** + `POST /api/graph/expand` (Supabase session check, then GitHub REST). Vite proxies `/api` in dev. |
 
 ## Why Supabase if you are new to SQL
 
@@ -22,7 +22,22 @@ You should still learn SQL basics over time (`SELECT`, `INSERT`, `WHERE`, `JOIN`
 
 ## Graph visualization
 
-Not locked here yet; options remain **react-force-graph-2d** or **sigma.js** (see [`../agents/tech-stack-options.md`](../agents/tech-stack-options.md)). Pick one when you start the graph UI.
+**Locked:** **`react-force-graph-2d`** for the first interactive prototype (force layout + directional links).
+
+## Local dev (web + API)
+
+From repo root (after `apps/web/.env` + `apps/server/.env` exist):
+
+- **`npm run dev:all`** — runs API + Vite together, or  
+- **`npm run dev:server`** (API on `:8787`) and **`npm run dev`** (Vite on `:5173`, proxies `/api` → API)
+
+See root [`README.md`](../../README.md).
+
+### Troubleshooting (common)
+
+- **“Missing SUPABASE_URL or SUPABASE_ANON_KEY”** after **Load graph**: the **API** is missing env. Put `SUPABASE_URL` and `SUPABASE_ANON_KEY` in **`apps/server/.env`**, restart **`npm run dev:server`**.  
+- **`provider is not enabled`**: enable **Auth → Providers → GitHub** in Supabase and **Save** with GitHub Client ID + Secret.  
+- **White screen / `supabaseUrl is required`**: add **`apps/web/.env`** with `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`, restart Vite.
 
 ## Your onboarding to-do list
 
