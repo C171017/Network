@@ -1,7 +1,6 @@
 import Database from "better-sqlite3";
 import { githubProfilePageUrl } from "./githubProfileUrl.js";
 import type { EdgeDTO, GraphDTO, NodeDTO } from "./graphTypes.js";
-import { publicGraphOwnerId } from "./graphStore.js";
 
 /**
  * Initial-screen node budget. Each read endpoint randomly samples up to this many
@@ -105,13 +104,42 @@ const NODE_SELECT_N =
  * slice rather than the first N by `github_id`.
  */
 export function readFullGraph(db: Database.Database): GraphDTO {
-  const { maxNodes, maxEdges } = readCaps();
-  const now = new Date().toISOString();
-  const ownerUserId = publicGraphOwnerId();
+  return readFullGraphWithOptions(db);
+}
 
-  const nodeRows = db
-    .prepare(`SELECT ${NODE_SELECT} FROM nodes WHERE owner_user_id = ? ORDER BY RANDOM() LIMIT ?`)
-    .all(ownerUserId, maxNodes) as NodeRow[];
+function clampRequestedMaxNodes(n: number, defaultMaxNodes: number): number {
+  if (!Number.isFinite(n) || n <= 0) return defaultMaxNodes;
+  return Math.min(Math.max(Math.floor(n), 1), 100_000);
+}
+
+export function readFullGraphWithOptions(
+  db: Database.Database,
+  options?: { maxNodes?: number },
+): GraphDTO {
+  const caps = readCaps();
+  const maxNodes =
+    options?.maxNodes != null ? clampRequestedMaxNodes(options.maxNodes, caps.maxNodes) : caps.maxNodes;
+  const maxEdges = caps.maxEdges;
+  const now = new Date().toISOString();
+  // Sample from the entire accumulated SQL pool (all owners), then de-duplicate by
+  // GitHub id so public mode reflects globally available data instead of one namespace.
+  const poolRows = db
+    .prepare(
+      `SELECT ${NODE_SELECT}
+       FROM nodes
+       ORDER BY RANDOM()
+       LIMIT ?`,
+    )
+    .all(Math.min(maxNodes * 4, 200_000)) as NodeRow[];
+  const dedupedRows: NodeRow[] = [];
+  const seenGithubIds = new Set<number>();
+  for (const row of poolRows) {
+    if (seenGithubIds.has(row.github_id)) continue;
+    seenGithubIds.add(row.github_id);
+    dedupedRows.push(row);
+    if (dedupedRows.length >= maxNodes) break;
+  }
+  const nodeRows = dedupedRows;
 
   if (nodeRows.length === 0) {
     return {
@@ -138,14 +166,14 @@ export function readFullGraph(db: Database.Database): GraphDTO {
   try {
     const edgeRows = db
       .prepare(
-        `SELECT e.source_id, e.target_id
+        `SELECT DISTINCT e.source_id, e.target_id
          FROM edges e
          INNER JOIN _graph_node_subset s ON s.id = e.source_id
          INNER JOIN _graph_node_subset t ON t.id = e.target_id
-         WHERE e.kind = 'follows' AND e.owner_user_id = ?
+         WHERE e.kind = 'follows'
          LIMIT ?`,
       )
-      .all(ownerUserId, maxEdges ?? -1) as Array<{ source_id: number; target_id: number }>;
+      .all(maxEdges ?? -1) as Array<{ source_id: number; target_id: number }>;
 
     const edges: EdgeDTO[] = edgeRows.map((e) => ({
       sourceGithubId: e.source_id,

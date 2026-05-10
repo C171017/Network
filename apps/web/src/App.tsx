@@ -21,6 +21,14 @@ type SessionInfo = {
 
 /** Persisted across the GitHub OAuth redirect so a long-press crawl can resume after sign-in. */
 const PENDING_CRAWL_KEY = 'network:pendingCrawlLogin'
+const DEFAULT_PUBLIC_INITIAL_MAX_NODES = 400
+
+function readPublicInitialMaxNodes(): number {
+  const raw = import.meta.env.VITE_PUBLIC_INITIAL_MAX_NODES
+  const n = typeof raw === 'string' ? Number(raw) : Number(raw ?? DEFAULT_PUBLIC_INITIAL_MAX_NODES)
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_PUBLIC_INITIAL_MAX_NODES
+  return Math.min(Math.max(Math.floor(n), 1), 100_000)
+}
 
 function readGithubLoginFromUser(user: User): string | null {
   const md = user.user_metadata as Record<string, unknown>
@@ -102,6 +110,7 @@ function mergeGraphDataAdditive(
 }
 
 export default function App() {
+  const publicInitialMaxNodes = readPublicInitialMaxNodes()
   const [session, setSession] = useState<SessionInfo | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [graphError, setGraphError] = useState<string | null>(null)
@@ -254,7 +263,7 @@ export default function App() {
       setGraphError(null)
       try {
         if (!session) {
-          const dto = await fetchPublicGraph()
+          const dto = await fetchPublicGraph({ maxNodes: publicInitialMaxNodes })
           setGraph(graphDtoToForceData(dto))
         } else {
           const dto = await fetchOwnedGraph({
@@ -274,7 +283,7 @@ export default function App() {
         if (!suppress) setGraphLoading(false)
       }
     },
-    [session],
+    [publicInitialMaxNodes, session],
   )
 
   useEffect(() => {

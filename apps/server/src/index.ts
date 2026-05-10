@@ -14,7 +14,7 @@ import {
   expandFollowingDepthGraph,
   type GithubProfileAugmentsMode,
 } from "./githubExpand.js";
-import { readFullGraph, readOwnerGraph, readReachableGraph } from "./graphRead.js";
+import { readFullGraphWithOptions, readOwnerGraph, readReachableGraph } from "./graphRead.js";
 import { openGraphDatabase, resolveGraphDbPath } from "./graphStore.js";
 import { readGithubLoginFromUser } from "./githubUser.js";
 
@@ -127,8 +127,17 @@ app.use(
 app.get("/health", (c) => c.json({ ok: true }));
 
 app.get("/api/graph/public", (c) => {
+  const qMaxNodes = c.req.query("maxNodes")?.trim();
+  let maxNodes: number | undefined;
+  if (qMaxNodes) {
+    const n = Number(qMaxNodes);
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1 || n > 100_000) {
+      return c.json({ error: "bad_request", message: "maxNodes must be an integer between 1 and 100000." }, 400);
+    }
+    maxNodes = n;
+  }
   try {
-    const graph = readFullGraph(graphDb);
+    const graph = readFullGraphWithOptions(graphDb, { maxNodes });
     return c.json(graph);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
