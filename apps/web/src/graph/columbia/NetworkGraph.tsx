@@ -33,6 +33,59 @@ import {
 ////////////////////////////////////////////
 ////////////////////////////////////////////
 
+function summarizeTopology(nodes, links) {
+  const nodeIds = new Set(nodes.map((n) => n.id));
+  const linkKeys = new Set((links ?? []).map((l) => `${l.source}->${l.target}`));
+  return { nodeIds, linkKeys };
+}
+
+function canIncrementalExpand(prevTopo, nextTopo) {
+  if (!prevTopo) return false;
+  if (nextTopo.linkKeys.size < prevTopo.linkKeys.size) return false;
+  if (nextTopo.nodeIds.size < prevTopo.nodeIds.size) return false;
+  for (const id of prevTopo.nodeIds) {
+    if (!nextTopo.nodeIds.has(id)) return false;
+  }
+  for (const lk of prevTopo.linkKeys) {
+    if (!nextTopo.linkKeys.has(lk)) return false;
+  }
+  return true;
+}
+
+function maxGroupPopulation(nodes, links) {
+  if (!nodes?.length) return 0;
+  const gm = buildGroupsFromData(nodes, links ?? []);
+  const counts = [];
+  gm.forEach((gi) => {
+    counts[gi] = (counts[gi] ?? 0) + 1;
+  });
+  let max = 0;
+  for (let i = 0; i < counts.length; i += 1) {
+    if (counts[i] > max) max = counts[i];
+  }
+  return max;
+}
+
+function connectedComponentGroupCount(nodes, links) {
+  if (!nodes?.length) return 0;
+  const gm = buildGroupsFromData(nodes, links ?? []);
+  const vals = [...gm.values()];
+  return vals.length ? Math.max(...vals) + 1 : 0;
+}
+
+function topologySignature(nodes, links) {
+  const { nodeIds, linkKeys } = summarizeTopology(nodes, links ?? []);
+  return `${[...nodeIds].sort((a, b) => a - b).join(',')}|${[...linkKeys].sort().join(',')}`;
+}
+
+function mergeNodeAttributesPreservingSimulation(prevDatum, incoming) {
+  Object.keys(incoming).forEach((k) => {
+    if (['x', 'y', 'vx', 'vy', 'fx', 'fy', 'index'].includes(k)) return;
+    if (k.startsWith('__')) return;
+    prevDatum[k] = incoming[k];
+  });
+}
+
 /** Never surfaced in hover (still used elsewhere, e.g. dbl‑click opens profile). */
 const HOVER_HIDDEN_PROFILE_KEYS = new Set(['login', 'public_repos', 'public_gists', 'html_url', 'type']);
 
@@ -565,6 +618,20 @@ const NetworkGraph = ({
   const [colorMaps, setColorMaps] = useState({});
   const [darkSurface, setDarkSurface] = useState(false);
 
+  /** Full rebuild counter when incremental patching cannot safely update the simulation/DOM graph. */
+  const [graphRebuildKey, setGraphRebuildKey] = useState(0);
+  /** Latest dataset from React props (streaming expand updates land here each render). */
+  const latestGraphDataRef = useRef(data);
+  latestGraphDataRef.current = data;
+  /** Explicit snapshot consumed by the rebuild effect after a fallback from incremental failure. */
+  const graphSnapForRebuildRef = useRef(null);
+  /** When falling back to a full rebuild, re-apply this camera so the viewport does not snap. */
+  const persistedZoomTransformRef = useRef(null);
+  /** Live bridge for monotonic expands (preserve zoom + reuse simulation/DOM joins). */
+  const graphLiveApiRef = useRef(null);
+  /** Last props topology signature applied by incremental patch / rebuild — avoids pointless work each render. */
+  const renderedTopologySigRef = useRef('');
+
   useEffect(() => {
     const hoverEl = hoverStatusRef.current;
     if (!hoverEl) return;
@@ -623,7 +690,14 @@ const NetworkGraph = ({
   //   - left drag       -> pan  (handled by d3.zoom)
   //   - middle drag     -> pan  (custom pointer handler below)
   //   - dblclick        -> ignored
-  const setupZoom = (svg, g, containerWidth, containerHeight, onTransformChange) => {
+  const setupZoom = (
+    svg,
+    g,
+    containerWidth,
+    containerHeight,
+    onTransformChange,
+    persistedZoomTransform,
+  ) => {
     const node = svg.node();
 
     const mobile = isMobileViewport();
@@ -665,8 +739,15 @@ const NetworkGraph = ({
       .scale(initialScale)
       .translate(-CIRCLE_CX, -CIRCLE_CY);
 
+    const appliedTransform =
+      persistedZoomTransform != null
+      && typeof persistedZoomTransform.k === 'number'
+      && Number.isFinite(persistedZoomTransform.k)
+        ? persistedZoomTransform
+        : initialTransform;
+
     svg.call(zoom)
-      .call(zoom.transform, initialTransform)
+      .call(zoom.transform, appliedTransform)
       .call(zoom.touchable(true));
 
     // Pan cursor: only force grabbing while actively panning the view (not on node drag).
@@ -805,9 +886,17 @@ const NetworkGraph = ({
     };
   }, []);
 
-  // Main visualization effect
+  // Full graph lifecycle: rebuild on auth/session/layoutToken; streaming data updates handled separately.
   useEffect(() => {
-    if (!svgRef.current || !data || !data.nodes || data.nodes.length === 0) return undefined;
+    graphLiveApiRef.current = null;
+
+    const dataset = graphSnapForRebuildRef.current ?? latestGraphDataRef.current;
+    graphSnapForRebuildRef.current = null;
+
+    const persistedZoomForBuild = persistedZoomTransformRef.current;
+    persistedZoomTransformRef.current = null;
+
+    if (!svgRef.current || !dataset?.nodes?.length) return undefined;
     const isMobile = isMobileViewport();
     const isDesktopSafari = isDesktopSafariBrowser();
     const enableHeavySvgEffects = !isMobile && !isDesktopSafari;
@@ -830,6 +919,8 @@ const NetworkGraph = ({
 
       const width = containerWidth;
       const height = containerHeight;
+
+      const live = { nodes: dataset.nodes, links: dataset.links ?? [] };
 
       // Clear previous SVG content
       d3.select(svgRef.current).selectAll('*').remove();
@@ -980,11 +1071,11 @@ const NetworkGraph = ({
         .attr('class', 'network-world');
 
       /* ──────────  GROUP‑AWARE LAYOUT (inside disk) ────────── */
-      const groupMap = buildGroupsFromData(data.nodes, data.links);
-      const groupCount = Math.max(...groupMap.values()) + 1;
+      let groupMap = buildGroupsFromData(live.nodes, live.links);
+      let groupCount = Math.max(...groupMap.values()) + 1;
 
       const groupSizes = Array.from({ length: groupCount }, () => 0);
-      data.nodes.forEach(n => { groupSizes[groupMap.get(n.id)] += 1; });
+      live.nodes.forEach(n => { groupSizes[groupMap.get(n.id)] += 1; });
 
       const BASE_R = 200;
       const PX_PER_NODE = 25;
@@ -1061,11 +1152,11 @@ const NetworkGraph = ({
       });
 
       const nodesByGroupSeed = Array.from({ length: groupCount }, () => []);
-      data.nodes.forEach((n) => {
+      live.nodes.forEach((n) => {
         nodesByGroupSeed[groupMap.get(n.id)].push(n);
       });
 
-      const totalNodesForLayout = data.nodes.length;
+      const totalNodesForLayout = live.nodes.length;
       const sqrtTotalNodes = Math.sqrt(Math.max(1, totalNodesForLayout));
 
       // Seed nodes with Poisson-like rejection inside each group's disk so they
@@ -1149,12 +1240,12 @@ const NetworkGraph = ({
       let lastLogoUiIsDark = null;
       let inClusterMode = false;
 
-      const linkForce = d3.forceLink(data.links)
+      const linkForce = d3.forceLink(live.links)
         .id(d => d.id)
         .distance(LINK_FORCE_DISTANCE)
         .strength(LINK_FORCE_STRENGTH);
 
-      simulation = d3.forceSimulation(data.nodes)
+      simulation = d3.forceSimulation(live.nodes)
         .force('link', linkForce)
         .force('collision', d3.forceCollide().radius(84))
         .alphaDecay(0.1) // controls cooldown speed
@@ -1162,10 +1253,10 @@ const NetworkGraph = ({
           simulation.stop(); // freeze after global layout settles
         });
 
-      data.nodes.forEach((n) => {
+      live.nodes.forEach((n) => {
         n.__groupIndex = groupMap.get(n.id);
       });
-      data.links.forEach((l) => {
+      live.links.forEach((l) => {
         l.__groupIndex = groupMap.get(l.source.id ?? l.source);
       });
 
@@ -1175,12 +1266,12 @@ const NetworkGraph = ({
       // geometry can offset them perpendicularly into a "two-lane" layout.
       {
         const directed = new Set();
-        for (const l of data.links) {
+        for (const l of live.links) {
           const sId = l.source.id ?? l.source;
           const tId = l.target.id ?? l.target;
           directed.add(`${sId}\u0001${tId}`);
         }
-        for (const l of data.links) {
+        for (const l of live.links) {
           const sId = l.source.id ?? l.source;
           const tId = l.target.id ?? l.target;
           l.__isMutual = directed.has(`${tId}\u0001${sId}`);
@@ -1206,8 +1297,8 @@ const NetworkGraph = ({
       // narrows toward the target, so the geometry itself communicates
       // direction (no separate arrow marker required). Mutual pairs are
       // offset perpendicularly inside computeLinkPath().
-      const fullLinks = activeLinkLayer.selectAll('.link-full')
-        .data(data.links)
+      let fullLinks = activeLinkLayer.selectAll('.link-full')
+        .data(live.links)
         .enter()
         .append('path')
         .attr('class', 'link-full')
@@ -1215,9 +1306,9 @@ const NetworkGraph = ({
         .attr('stroke', 'none');
 
       // Create nodes
-      const node = activeNodeLayer
+      let node = activeNodeLayer
         .selectAll('.node')
-        .data(data.nodes)
+        .data(live.nodes)
         .enter()
         .append('g')
         .attr('class', 'node')
@@ -1235,7 +1326,7 @@ const NetworkGraph = ({
         let sx = 0;
         let sy = 0;
         let count = 0;
-        for (const n of data.nodes) {
+        for (const n of live.nodes) {
           if (n.__groupIndex === gi) {
             sx += n.x;
             sy += n.y;
@@ -1248,7 +1339,7 @@ const NetworkGraph = ({
 
       const computeGroupClusterCircles = (gi) => {
         const groupNodes = [];
-        for (const n of data.nodes) {
+        for (const n of live.nodes) {
           if (n.__groupIndex === gi) groupNodes.push(n);
         }
         if (!groupNodes.length) return [];
@@ -1273,11 +1364,11 @@ const NetworkGraph = ({
         renderClusterContentsFromModule(sel, computeGroupClusterCircles(gi));
       });
 
-      const fullLinksByGroup = Array.from({ length: groupCount }, () => []);
+      let fullLinksByGroup = Array.from({ length: groupCount }, () => []);
       fullLinks.each(function (d) {
         fullLinksByGroup[d.__groupIndex].push(this);
       });
-      const nodesByGroup = Array.from({ length: groupCount }, () => []);
+      let nodesByGroup = Array.from({ length: groupCount }, () => []);
       node.each(function (d) {
         nodesByGroup[d.__groupIndex].push(this);
       });
@@ -1354,8 +1445,8 @@ const NetworkGraph = ({
         teardownGroupMiniSimOnly();
         simulation.stop();
 
-        const groupNodes = data.nodes.filter((n) => n.__groupIndex === gi);
-        const groupLinks = data.links.filter((l) => {
+        const groupNodes = live.nodes.filter((n) => n.__groupIndex === gi);
+        const groupLinks = live.links.filter((l) => {
           const s = groupMap.get(l.source.id ?? l.source);
           const t = groupMap.get(l.target.id ?? l.target);
           return s === gi && t === gi;
@@ -1476,7 +1567,7 @@ const NetworkGraph = ({
         }
 
         // Freeze physics for ALL nodes so they hold position while clustered.
-        data.nodes.forEach((n) => {
+        live.nodes.forEach((n) => {
           if (!n.__clusterFrozen) {
             n.__prevFx = n.fx;
             n.__prevFy = n.fy;
@@ -1517,7 +1608,7 @@ const NetworkGraph = ({
 
         // Restore prior fx/fy on cluster-frozen nodes (which may have been null,
         // or pinned by the older viewport-cull path).
-        data.nodes.forEach((n) => {
+        live.nodes.forEach((n) => {
           if (n.__clusterFrozen) {
             n.fx = n.__prevFx ?? null;
             n.fy = n.__prevFy ?? null;
@@ -1570,7 +1661,7 @@ const NetworkGraph = ({
 
         const seen = Array.from({ length: groupCount }, () => false);
         let seenCount = 0;
-        for (const n of data.nodes) {
+        for (const n of live.nodes) {
           const gi = n.__groupIndex;
           if (seen[gi]) continue;
           if (n.x >= minX && n.x <= maxX && n.y >= minY && n.y <= maxY) {
@@ -1601,7 +1692,7 @@ const NetworkGraph = ({
         }
 
         // Freeze physics for offscreen groups and unfreeze when visible again.
-        data.nodes.forEach((n) => {
+        live.nodes.forEach((n) => {
           const isVisible = visibleGroups.has(n.__groupIndex);
           if (!isVisible) {
             if (!n.__culledFixed && n.fx == null && n.fy == null) {
@@ -1630,7 +1721,8 @@ const NetworkGraph = ({
           currentTransform = transform;
           applyGroupCulling();
           updateUiSurfaceTheme();
-        }
+        },
+        persistedZoomForBuild,
       );
       zoomRef.current = zoom;
       zoomCleanupRef.current = cleanupZoom;
@@ -1877,7 +1969,7 @@ const NetworkGraph = ({
           return;
         }
 
-        clampNodesToDisk(data.nodes);
+        clampNodesToDisk(live.nodes);
 
         fullLinks
           .filter(d => visibleGroups.has(d.__groupIndex))
@@ -1965,6 +2057,314 @@ const NetworkGraph = ({
         releaseActiveDrag();
       }
 
+      const svgNodeEl = svg.node();
+      renderedTopologySigRef.current = topologySignature(live.nodes, live.links ?? []);
+
+      graphLiveApiRef.current = {
+        session: authenticatedSession,
+        getPersistableZoom: () => d3.zoomTransform(svgNodeEl),
+        tryIncrementalUpdate: (nextDataset) => {
+          const nextLinksList = nextDataset.links ?? [];
+
+          const incomingSig = topologySignature(nextDataset.nodes, nextLinksList);
+          if (incomingSig === renderedTopologySigRef.current) return true;
+
+          const prevTopo = summarizeTopology(live.nodes, live.links);
+          const nextTopo = summarizeTopology(nextDataset.nodes, nextLinksList);
+          if (!canIncrementalExpand(prevTopo, nextTopo)) return false;
+
+          const prevMaxPop = maxGroupPopulation(live.nodes, live.links);
+          const nextMaxPop = maxGroupPopulation(nextDataset.nodes, nextLinksList);
+          if (prevMaxPop < CLUSTER_GROUP_MIN_NODES && nextMaxPop >= CLUSTER_GROUP_MIN_NODES) {
+            return false;
+          }
+
+          const oldById = new Map(live.nodes.map((n) => [n.id, n]));
+          const mergedById = new Map();
+          const merged = [];
+
+          for (const inc of nextDataset.nodes) {
+            const existing = oldById.get(inc.id);
+            if (existing) {
+              mergeNodeAttributesPreservingSimulation(existing, inc);
+              merged.push(existing);
+              mergedById.set(existing.id, existing);
+            } else {
+              const neu = { ...inc };
+              merged.push(neu);
+              mergedById.set(neu.id, neu);
+            }
+          }
+
+          function pickXYForNewNode(nodeId) {
+            const anchors = [];
+            for (let li = 0; li < nextLinksList.length; li += 1) {
+              const l = nextLinksList[li];
+              const sId = typeof l.source === 'object' && l.source !== null ? l.source.id : l.source;
+              const tId = typeof l.target === 'object' && l.target !== null ? l.target.id : l.target;
+              let other = null;
+              if (sId === nodeId) other = tId;
+              else if (tId === nodeId) other = sId;
+              else continue;
+              const p = mergedById.get(other);
+              if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) anchors.push(p);
+            }
+            if (!anchors.length) {
+              const j = movableLimit > 90 ? movableLimit * 0.06 : 42;
+              return clampToMovableDisk(
+                CIRCLE_CX + (Math.random() - 0.5) * j,
+                CIRCLE_CY + (Math.random() - 0.5) * j,
+              );
+            }
+            let sx = 0;
+            let sy = 0;
+            for (let i = 0; i < anchors.length; i += 1) {
+              sx += anchors[i].x;
+              sy += anchors[i].y;
+            }
+            const cx = sx / anchors.length;
+            const cy = sy / anchors.length;
+            const j = movableLimit > 140 ? movableLimit * 0.035 : 32;
+            return clampToMovableDisk(
+              cx + (Math.random() - 0.5) * j,
+              cy + (Math.random() - 0.5) * j,
+            );
+          }
+
+          let needsXY = false;
+          for (let i = 0; i < merged.length; i += 1) {
+            const nn = merged[i];
+            if (!Number.isFinite(nn.x) || !Number.isFinite(nn.y)) {
+              needsXY = true;
+              break;
+            }
+          }
+          if (needsXY) {
+            merged.forEach((nn, idx) => {
+              if (Number.isFinite(nn.x) && Number.isFinite(nn.y)) return;
+              const p =
+                idx === 0 && merged.length === 1
+                  ? clampToMovableDisk(CIRCLE_CX, CIRCLE_CY)
+                  : pickXYForNewNode(nn.id);
+              nn.x = p.x;
+              nn.y = p.y;
+              if (!Number.isFinite(nn.vx)) nn.vx = 0;
+              if (!Number.isFinite(nn.vy)) nn.vy = 0;
+            });
+          }
+
+          const resolved = [];
+          for (let li = 0; li < nextLinksList.length; li += 1) {
+            const rl = nextLinksList[li];
+            const sid = rl.source?.id ?? rl.source;
+            const tid = rl.target?.id ?? rl.target;
+            const sn = mergedById.get(sid);
+            const tn = mergedById.get(tid);
+            if (!sn || !tn) continue;
+            resolved.push({ source: sn, target: tn });
+          }
+
+          const directed = new Set();
+          resolved.forEach((l) => directed.add(`${l.source.id}\u0001${l.target.id}`));
+          resolved.forEach((l) => {
+            l.__isMutual = directed.has(`${l.target.id}\u0001${l.source.id}`);
+          });
+
+          groupMap = buildGroupsFromData(merged, resolved);
+          const nextGroupCount = Math.max(...groupMap.values()) + 1;
+          if (nextGroupCount !== groupCount || groupSizes.length !== nextGroupCount) return false;
+
+          groupSizes.fill(0);
+          merged.forEach((nn) => {
+            const gi = groupMap.get(nn.id);
+            nn.__groupIndex = gi;
+            groupSizes[gi] += 1;
+          });
+          resolved.forEach((l) => {
+            l.__groupIndex = groupMap.get(l.source.id);
+          });
+
+          live.nodes = merged;
+          live.links = resolved;
+
+          const linkDatumKey = (d) => `${d.source.id}->${d.target.id}`;
+
+          const linkSel = activeLinkLayer.selectAll('.link-full').data(resolved, linkDatumKey);
+          linkSel.exit().remove();
+          const linkEnter = linkSel
+            .enter()
+            .append('path')
+            .attr('class', 'link-full')
+            .attr('fill', '#e5e7eb')
+            .attr('stroke', 'none');
+          fullLinks = linkEnter.merge(linkSel);
+
+          const nd = activeNodeLayer.selectAll('.node').data(merged, (d) => d.id);
+          nd.exit().remove();
+
+          const ndEnter = nd
+            .enter()
+            .append('g')
+            .attr('class', 'node')
+            .call(
+              d3
+                .drag()
+                .on('start', dragstarted)
+                .on('drag', dragged)
+                .on('end', dragended),
+            );
+
+          ndEnter.each(function paintNew(datum) {
+            const nodeGroup = d3.select(this);
+            const nodePathInfo = createNodePath(datum);
+            renderNodeVisual(nodeGroup, datum, nodePathInfo, {
+              colorMaps,
+              colorBy,
+              getNodeColor,
+              simplified: false,
+            });
+            nodeGroup
+              .append('circle')
+              .attr('class', 'long-press-ring')
+              .attr('r', NODE_RADIUS + 6)
+              .attr('fill', 'none')
+              .attr('pointer-events', 'none')
+              .style('display', 'none');
+          });
+
+          ndEnter
+            .on('click', (event, d) => {
+              if (suppressNextClick) {
+                suppressNextClick = false;
+                return;
+              }
+              if (nodeClickTimer) clearTimeout(nodeClickTimer);
+              nodeClickTimer = setTimeout(() => {
+                nodeClickTimer = null;
+                const grp = groupMap.get(d.id);
+                currentHighlight = currentHighlight === grp ? null : grp;
+                applyViewportHighlightClasses();
+                if (interactivePhysicsRef.current && currentHighlight == null) {
+                  stopGroupMiniSimFully();
+                }
+              }, 280);
+            })
+            .on('dblclick', (event, d) => {
+              event.preventDefault();
+              event.stopPropagation();
+              if (interactivePhysicsRef.current) return;
+              if (nodeClickTimer) {
+                clearTimeout(nodeClickTimer);
+                nodeClickTimer = null;
+              }
+              const raw = d.profileUrl != null ? String(d.profileUrl).trim() : '';
+              const url =
+                raw.length > 0 ? raw : `https://github.com/${encodeURIComponent(String(d.login ?? ''))}`;
+              if (url.length > 0) {
+                window.open(url, '_blank', 'noopener,noreferrer');
+              }
+            })
+            .on('mouseover', (event, d) => {
+              const el = hoverStatusRef.current;
+              if (!el) return;
+              renderNodeHoverPanel(el, d);
+              el.style.display = 'block';
+              placeHoverNearPointer(event);
+            })
+            .on('mousemove', (event) => {
+              const el = hoverStatusRef.current;
+              if (!el || el.style.display === 'none') return;
+              placeHoverNearPointer(event);
+            })
+            .on('mouseout', (event) => {
+              const el = hoverStatusRef.current;
+              if (!el) return;
+              const next = event.relatedTarget;
+              if (next instanceof Node && el.contains(next)) return;
+              el.style.display = 'none';
+            })
+            .on('pointerdown', function onIncrementalPtr(event, dn) {
+              if (event.pointerType === 'mouse' && event.button !== 0) return;
+              cancelLongPress();
+              longPressFired = false;
+              if (interactivePhysicsRef.current) return;
+
+              longPressStartX = event.clientX;
+              longPressStartY = event.clientY;
+              longPressActiveNode = dn;
+
+              const ringSel = d3.select(this).select('.long-press-ring');
+              const ringNode = ringSel.node();
+              longPressActiveRing = ringNode;
+              if (ringNode) {
+                const r = NODE_RADIUS + 6;
+                const C = 2 * Math.PI * r;
+                ringSel
+                  .style('display', null)
+                  .style('transition', 'none')
+                  .attr('stroke-dasharray', C)
+                  .attr('stroke-dashoffset', C);
+                void ringNode.getBoundingClientRect();
+                ringSel
+                  .style('transition', `stroke-dashoffset ${LONG_PRESS_MS}ms linear`)
+                  .attr('stroke-dashoffset', 0);
+              }
+
+              longPressTimer = setTimeout(() => {
+                longPressTimer = null;
+                if (interactivePhysicsRef.current) {
+                  resetLongPressRing();
+                  longPressActiveNode = null;
+                  return;
+                }
+                longPressFired = true;
+                resetLongPressRing();
+                const captured = longPressActiveNode;
+                longPressActiveNode = null;
+                if (captured) {
+                  captured.fx = null;
+                  captured.fy = null;
+                }
+                suppressNextClick = true;
+                const login = captured?.login;
+                if (
+                  typeof login === 'string'
+                  && login.length > 0
+                  && typeof onNodeCrawlRef.current === 'function'
+                ) {
+                  try {
+                    onNodeCrawlRef.current(login);
+                  } catch (err) {
+                    console.error('onNodeCrawl failed:', err);
+                  }
+                }
+              }, LONG_PRESS_MS);
+            });
+
+          node = ndEnter.merge(nd);
+
+          for (let gi = 0; gi < groupCount; gi += 1) {
+            fullLinksByGroup[gi].length = 0;
+            nodesByGroup[gi].length = 0;
+          }
+
+          fullLinks.each(function refillLinkBuckets(datum) {
+            fullLinksByGroup[datum.__groupIndex].push(this);
+          });
+          node.each(function refillNodeBuckets(datum) {
+            nodesByGroup[datum.__groupIndex].push(this);
+          });
+
+          linkForce.links(resolved);
+          simulation.nodes(merged);
+          simulation.alpha(0.32).restart();
+
+          visibleGroups = new Set();
+          renderedTopologySigRef.current = topologySignature(live.nodes, live.links ?? []);
+          return true;
+        },
+      };
+
     } catch (error) {
       console.error("Error rendering network visualization:", error);
     }
@@ -1990,10 +2390,33 @@ const NetworkGraph = ({
         zoomCleanupRef.current = null;
       }
     };
-    // Rebuild when the dataset changes (primary) or when auth session toggles—the same
-    // node count may still merit a denser-layout profile after sign-in. `colorBy` /
-    // `colorMaps` updates use the lighter recolor effect below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above
+    // Rebuild from scratch when auth changes, layout token bumps, or session-specific defaults shift.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- graphLiveApiRef carries streaming updates
+  }, [authenticatedSession, graphRebuildKey]);
+
+  // Monotonic dataset growth (streaming expand): update simulation/DOM without resetting zoom.
+  useEffect(() => {
+    const api = graphLiveApiRef.current;
+    if (!api || api.session !== authenticatedSession) return undefined;
+
+    const nextLinksRaw = latestGraphDataRef.current.links ?? [];
+    const nextSig = topologySignature(latestGraphDataRef.current.nodes, nextLinksRaw);
+    if (nextSig === renderedTopologySigRef.current) return undefined;
+
+    const ok = api.tryIncrementalUpdate(latestGraphDataRef.current);
+
+    if (!ok) {
+      const svgEl = svgRef.current;
+      if (svgEl) {
+        const z = api.getPersistableZoom();
+        persistedZoomTransformRef.current = z;
+      }
+      graphSnapForRebuildRef.current = latestGraphDataRef.current;
+      setGraphRebuildKey((k) => k + 1);
+    }
+
+    return undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- streaming `data` should not rerun full lifecycle
   }, [data, authenticatedSession]);
 
 

@@ -2,7 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import NetworkGraph from './components/NetworkGraph'
 import { graphDtoToForceData, type GraphData } from './graph/graphDto'
-import { expandGraph, fetchPublicGraph, fetchReachableGraph } from './lib/graphApi'
+import {
+  DEFAULT_EXPAND_STREAM_THROTTLE_MS,
+  expandGraphStream,
+  fetchPublicGraph,
+  fetchReachableGraph,
+  type GraphDTO,
+} from './lib/graphApi'
 import { supabase, isSupabaseConfigured } from './lib/supabase'
 import { LONG_PRESS_MS, LONG_PRESS_MOVE_CANCEL_PX } from './graph/columbia/graphConstants'
 import './App.css'
@@ -31,14 +37,46 @@ function readGithubLoginFromUser(user: User): string | null {
   return null
 }
 
+function buildSeedGraphDto(login: string): GraphDTO {
+  const normalized = login.trim()
+  const profileUrl = `https://github.com/${encodeURIComponent(normalized)}`
+  return {
+    rootLogin: normalized,
+    generatedAt: new Date().toISOString(),
+    caps: { maxFollowers: 0, maxFollowing: 0 },
+    truncation: {
+      followersTotal: null,
+      followingTotal: null,
+      followersReturned: 0,
+      followingReturned: 0,
+    },
+    nodes: [
+      {
+        githubId: -1,
+        login: normalized,
+        avatarUrl: '',
+        name: normalized,
+        bio: null,
+        company: null,
+        location: null,
+        websiteUrl: null,
+        profileUrl,
+        isRoot: true,
+        depth: 0,
+        expanded: 0,
+        profile: null,
+      },
+    ],
+    edges: [],
+  }
+}
+
 export default function App() {
   const [session, setSession] = useState<SessionInfo | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [graphError, setGraphError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
   const [graphLoading, setGraphLoading] = useState(true)
   const [graph, setGraph] = useState<GraphData | null>(null)
-  const [rootOverride, setRootOverride] = useState('')
   /** Matches graph chrome (dark inner disk vs light outer); default dark for page background before graph reports. */
   const [uiSurfaceDark, setUiSurfaceDark] = useState(true)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
@@ -179,28 +217,35 @@ export default function App() {
     setAccountMenuOpen((o) => !o)
   }
 
-  const effectiveRoot = (rootOverride.trim() || session?.login || '').trim()
-
-  const refreshGraphFromSql = useCallback(async () => {
-    setGraphLoading(true)
-    setGraphError(null)
-    try {
-      if (!session) {
-        const dto = await fetchPublicGraph()
-        setGraph(graphDtoToForceData(dto))
-      } else {
-        const dto = await fetchReachableGraph({
-          supabaseAccessToken: session.supabaseAccessToken,
-        })
-        setGraph(graphDtoToForceData(dto))
+  const refreshGraphFromSql = useCallback(
+    async (options?: { suppressLoadingSpinner?: boolean }) => {
+      const suppress = options?.suppressLoadingSpinner ?? false
+      if (!suppress) setGraphLoading(true)
+      setGraphError(null)
+      try {
+        if (!session) {
+          const dto = await fetchPublicGraph()
+          setGraph(graphDtoToForceData(dto))
+        } else {
+          const dto = await fetchReachableGraph({
+            supabaseAccessToken: session.supabaseAccessToken,
+          })
+          if (dto.nodes.length > 0) {
+            setGraph(graphDtoToForceData(dto))
+          } else {
+            // First signed-in experience: show a single seed node so user can long-press to expand.
+            setGraph(graphDtoToForceData(buildSeedGraphDto(session.login)))
+          }
+        }
+      } catch (e) {
+        setGraph(null)
+        setGraphError(e instanceof Error ? e.message : String(e))
+      } finally {
+        if (!suppress) setGraphLoading(false)
       }
-    } catch (e) {
-      setGraph(null)
-      setGraphError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setGraphLoading(false)
-    }
-  }, [session])
+    },
+    [session],
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -256,19 +301,20 @@ export default function App() {
         if (oauthError) setError(oauthError.message)
         return
       }
-      setLoading(true)
       setError(null)
       try {
-        await expandGraph({
+        await expandGraphStream({
           supabaseAccessToken: session.supabaseAccessToken,
           githubAccessToken: session.githubAccessToken,
           rootLogin: target,
+          throttleMs: DEFAULT_EXPAND_STREAM_THROTTLE_MS,
+          onGraph: (dto) => {
+            setGraph(graphDtoToForceData(dto))
+          },
         })
-        await refreshGraphFromSql()
+        await refreshGraphFromSql({ suppressLoadingSpinner: true })
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
-      } finally {
-        setLoading(false)
       }
     },
     [session, refreshGraphFromSql],
@@ -297,11 +343,6 @@ export default function App() {
     }, 0)
     return () => window.clearTimeout(id)
   }, [session, crawlFromLogin])
-
-  async function loadGraph() {
-    if (!effectiveRoot) return
-    await crawlFromLogin(effectiveRoot)
-  }
 
   if (!isSupabaseConfigured) {
     return (
@@ -397,30 +438,9 @@ export default function App() {
                 <p className="auth-popover-hint auth-popover-hint-tight">
                   No hosted sign-out URL—this only ends the session in this browser.
                 </p>
-                <div className="auth-popover-crawl">
-                  <label className="chrome-field">
-                    <span>Root for GitHub crawl</span>
-                    <input
-                      value={rootOverride}
-                      onChange={(e) => setRootOverride(e.target.value)}
-                      placeholder={`default: ${session.login}`}
-                      spellCheck={false}
-                      autoCapitalize="off"
-                      autoCorrect="off"
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    className="chrome-btn primary"
-                    disabled={loading || !effectiveRoot}
-                    onClick={() => {
-                      void loadGraph()
-                      setAccountMenuOpen(false)
-                    }}
-                  >
-                    {loading ? 'Expanding…' : 'Expand from GitHub'}
-                  </button>
-                </div>
+                <p className="auth-popover-hint auth-popover-hint-tight">
+                  Expand by long-holding any node in the graph.
+                </p>
               </>
             )}
           </div>
@@ -440,8 +460,8 @@ export default function App() {
           <div className="graph-placeholder">Loading graph from database…</div>
         ) : (
           <div className="graph-placeholder">
-            No nodes in the local graph database yet. Use the logo menu to sign in, then &quot;Expand from GitHub&quot; to crawl
-            follows into SQLite.
+            No nodes in the local graph database yet. Sign in to start from your own node, then long-hold a node to
+            expand.
           </div>
         )}
       </div>
