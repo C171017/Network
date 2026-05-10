@@ -64,7 +64,8 @@
   letter-spacing: .02em;
 }
 
-.node:hover circle {
+.node:hover circle:not(.node-hub),
+.node:hover circle.node-outline {
   stroke: #202124;
   stroke-width: 2px;
 }

@@ -23,11 +23,20 @@ import {
   arrowPathAtFraction
 } from './geometry';
 import { renderClusterContents as renderClusterContentsFromModule } from './clusters';
+import {
+  LINK_FORCE_DISTANCE,
+  LINK_FORCE_DISTANCE_GROUP_MINI,
+  LINK_FORCE_STRENGTH,
+  NODE_RADIUS
+} from './graphConstants';
 ////////////////////////////////////////////
 ////////////////////////////////////////////
 
 
-const NODE_RADIUS = 30;
+function nodeAvatarUrl(d) {
+  const u = d.avatarUrl != null ? String(d.avatarUrl).trim() : '';
+  return u.length > 0 ? u : '';
+}
 
 /////////////////////////////////////////////
 /////////////////////////////////////////////
@@ -43,7 +52,34 @@ function renderNodeVisual(nodeGroup, d, nodePathInfo, options) {
     simplified = false
   } = options;
 
-  if (!simplified && nodePathInfo) {
+  const avatarUrl = nodeAvatarUrl(d);
+
+  if (avatarUrl) {
+    const clipId = `node-avatar-clip-${d.id}`;
+    nodeGroup.append('defs')
+      .append('clipPath')
+      .attr('id', clipId)
+      .append('circle')
+      .attr('r', NODE_RADIUS)
+      .attr('cx', 0)
+      .attr('cy', 0);
+    const img = nodeGroup
+      .append('image')
+      .attr('href', avatarUrl)
+      .attr('x', -NODE_RADIUS)
+      .attr('y', -NODE_RADIUS)
+      .attr('width', NODE_RADIUS * 2)
+      .attr('height', NODE_RADIUS * 2)
+      .attr('preserveAspectRatio', 'xMidYMid slice')
+      .attr('clip-path', `url(#${clipId})`);
+    if (includeDataAttrs) img.attr('data-avatar', true);
+    nodeGroup
+      .append('circle')
+      .attr('class', 'node-outline')
+      .attr('r', NODE_RADIUS)
+      .attr('fill', 'none')
+      .attr('pointer-events', 'none');
+  } else if (!simplified && nodePathInfo) {
     const items = nodePathInfo.items;
     const colorMap = colorMaps[colorBy];
     const anglePerItem = (2 * Math.PI) / items.length;
@@ -161,8 +197,12 @@ function buildColorClusterCircles(groupNodes, getNodeColor, groupCenter) {
     const area = Math.max(MIN_CLUSTER_AREA, Math.PI * radius * radius);
     const density = nodes.length / area;
 
+    const avatarUrl =
+      nodes.map((n) => String(n.avatarUrl ?? '').trim()).find((s) => s.length > 0) ?? '';
+
     circles.push({
       color,
+      avatarUrl,
       count: nodes.length,
       cx: midX - groupCenter.x,
       cy: midY - groupCenter.y,
@@ -740,8 +780,8 @@ const NetworkGraph = ({
 
       const linkForce = d3.forceLink(data.links)
         .id(d => d.id)
-        .distance(400)
-        .strength(1);
+        .distance(LINK_FORCE_DISTANCE)
+        .strength(LINK_FORCE_STRENGTH);
 
       simulation = d3.forceSimulation(data.nodes)
         .force('link', linkForce)
@@ -963,7 +1003,7 @@ const NetworkGraph = ({
 
         groupMiniSimInstance = d3
           .forceSimulation(groupNodes)
-          .force('link', d3.forceLink(groupLinks).id((n) => n.id).distance(300).strength(1))
+          .force('link', d3.forceLink(groupLinks).id((n) => n.id).distance(LINK_FORCE_DISTANCE_GROUP_MINI).strength(LINK_FORCE_STRENGTH))
           .force('collision', d3.forceCollide().radius(80))
           .alphaDecay(0)
           .force('charge', d3.forceManyBody().strength(-1500))
@@ -1419,6 +1459,8 @@ const NetworkGraph = ({
 
       nodeGroup.selectAll('path').remove();
       nodeGroup.selectAll('circle').remove();
+      nodeGroup.selectAll('image').remove();
+      nodeGroup.selectAll('defs').remove();
 
       renderNodeVisual(nodeGroup, d, nodePathInfo, {
         colorMaps,

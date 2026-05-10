@@ -1,4 +1,12 @@
-export const NODE_RADIUS = 30
+export const NODE_RADIUS = 39
+
+/** Preferred edge length in the force simulation (node center–to–center along links). */
+export const LINK_FORCE_DISTANCE = 600
+/** Same for the temporary single-group mini simulation when dragging a cluster. */
+export const LINK_FORCE_DISTANCE_GROUP_MINI = 450
+
+/** Link stiffness [0,1]; lower = softer / more elastic (1 = rigid). */
+export const LINK_FORCE_STRENGTH = 0.38
 
 export const ZOOM_MIN_DESKTOP = 0.03
 export const ZOOM_MAX_DESKTOP = 0.8
