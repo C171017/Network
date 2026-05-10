@@ -1,0 +1,237 @@
+.network-container {
+  --primary-color: #2563eb;
+  --text-color: #111827;
+  --text-light: #6b7280;
+  --card-bg: #ffffff;
+  --border-color: #e5e7eb;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 1.5rem;
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  position: relative;
+  touch-action: none;
+  user-select: none;
+  background: #000;
+}
+
+.control-panel {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 10;
+}
+
+.visualization-area {
+  display: flex;
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.network-graph {
+  flex: 1;
+  background: black;
+  cursor: default;
+  position: relative;
+  z-index: 2;
+}
+
+.network-graph .node {
+  cursor: pointer;
+}
+
+.node circle {
+  cursor: pointer;
+  transition: transform .3s;
+}
+
+.node text {
+  pointer-events: none;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff;
+  letter-spacing: .02em;
+}
+
+.node:hover circle {
+  stroke: #202124;
+  stroke-width: 2px;
+}
+
+path {
+  stroke-opacity: .8;
+}
+
+.tooltip {
+  position: absolute;
+  padding: var(--spacing-md);
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  opacity: 0;
+  transition: opacity .3s;
+  font-size: .9rem;
+  max-width: 250px;
+  z-index: 100;
+  transform: translateY(10px);
+  color: var(--text-color);
+}
+
+.tooltip.visible {
+  opacity: .96;
+  transform: translateY(0);
+}
+
+.tooltip h4 {
+  margin-bottom: var(--spacing-sm);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--primary-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.tooltip p {
+  margin: 3px 0;
+}
+
+.legend-container {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #fff;
+  border: 1px solid #dadce0;
+  border-radius: 4px;
+  z-index: 100;
+  font-size: 14px;
+  text-align: center;
+}
+
+@media (max-width: 768px) {
+  .network-container { height: 100dvh; }
+  .control-panel select { min-width: 120px; }
+  .tooltip { max-width: 200px; font-size: 12px; }
+  .tooltip h4 { font-size: 14px; }
+  .node text { font-size: 12px; }
+  .legend-container {
+    left: 10px;
+    bottom: 10px;
+    width: calc(100% - 80px);
+    font-size: 12px;
+    transform: none;
+  }
+}
+
+.network-graph::after {
+  content: "Drag to move view";
+  position: absolute;
+  bottom: 15px;
+  left: 15px;
+  background: rgba(0,0,0,.6);
+  color: #fff;
+  border-radius: 4px;
+  font-size: 12px;
+  opacity: .7;
+  pointer-events: none;
+}
+
+@media (max-width: 600px) {
+  .controls-legend-container {
+    position: fixed;
+    left: 4vw;
+    right: 4vw;
+    bottom: 10px;
+    width: auto;
+    align-items: center;
+  }
+  .controls-legend-container > .control-panel {
+    position: fixed;
+    top: max(10px, env(safe-area-inset-top));
+    left: 50%;
+    transform: translateX(-50%);
+    width: auto;
+    min-width: 0;
+    margin: 0;
+    z-index: 101;
+  }
+  .controls-legend-container > .control-panel select {
+    width: auto;
+    min-width: 180px;
+  }
+  .controls-legend-container > .legend {
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
+.node,
+.link-full,
+.link-arrow {
+  transition: opacity .2s;
+}
+
+/* Desktop Safari can stutter when many SVG elements transition opacity. */
+.network-container.desktop-safari .node,
+.network-container.desktop-safari .link-full,
+.network-container.desktop-safari .link-arrow {
+  transition: none;
+}
+
+/* Instant opacity on touch / narrow viewports — avoids jank when toggling focus on many SVG elements. */
+@media (hover: none), (max-width: 768px) {
+  .node,
+  .link-full,
+  .link-arrow {
+    transition: none;
+  }
+}
+
+.dim {
+  opacity: .1 !important;
+}
+
+.culled {
+  display: none;
+}
+
+.node.highlight circle,
+.node.highlight path,
+.link-full.highlight,
+.link-arrow.highlight {
+  opacity: 1 !important;
+}
+
+.controls-legend-container {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  gap: 0;   
+  
+
+  /* shrink-to-fit by default (width: auto on an abs‑pos block) */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;      /* children will stretch to container width */
+  gap: var(--spacing-md);
+  z-index: 100;
+  box-sizing: border-box;
+}
+
+/* make each direct child (your ControlPanel wrapper & your .legend) fill that container */
+.controls-legend-container > * {
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+}
+

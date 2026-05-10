@@ -1,0 +1,129 @@
+.control-panel {
+  border-radius: var(--radius-lg);
+  margin: 0 auto var(--spacing-md);
+  transition: transform 0.3s;
+  width: 100%;
+  margin-bottom: 0;
+}
+.control-panel:hover {
+  transform: translateY(-3px);
+}
+
+.control-panel select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.filter-section {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-md);
+  justify-content: center;
+  margin-bottom: var(--spacing-sm);
+}
+
+.control-panel label {
+  font-weight: 600;
+  text-align: right;
+}
+
+.control-panel select {
+  padding: 10px 42px 10px 14px;
+  min-width: 180px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 16px;
+  background-color: rgba(248, 250, 252, 0.1);
+  color: rgba(17, 24, 39, 0.94);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.26),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.08),
+    0 8px 22px rgba(7, 14, 27, 0.28);
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI Variable Display', 'Segoe UI', Inter, sans-serif;
+  font-size: 1rem;
+  font-weight: 600;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s,
+    background-color 0.2s;
+  color-scheme: light;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='9' viewBox='0 0 14 9'%3E%3Cpath d='M1 1.5 7 7.5 13 1.5' fill='none' stroke='rgba(17,24,39,0.72)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 14px 9px;
+  -webkit-backdrop-filter: saturate(140%) blur(14px);
+  backdrop-filter: saturate(140%) blur(14px);
+}
+.control-panel select:hover,
+.control-panel select:focus {
+  border-color: rgba(255, 255, 255, 0.42);
+  background: rgba(248, 250, 252, 0.25);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    0 10px 24px rgba(7, 14, 27, 0.32),
+    0 0 0 2px rgba(255, 255, 255, 0.18);
+  outline: none;
+}
+
+.control-panel.dark-surface select {
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background-color: rgba(17, 24, 39, 0.56);
+  color: rgba(248, 250, 252, 0.96);
+  color-scheme: dark;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.06),
+    0 12px 28px rgba(0, 0, 0, 0.38);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='9' viewBox='0 0 14 9'%3E%3Cpath d='M1 1.5 7 7.5 13 1.5' fill='none' stroke='rgba(248,250,252,0.84)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+.control-panel.dark-surface select:hover,
+.control-panel.dark-surface select:focus {
+  border-color: rgba(255, 255, 255, 0.38);
+  background: rgba(17, 24, 39, 0.64);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    0 14px 30px rgba(0, 0, 0, 0.42),
+    0 0 0 2px rgba(255, 255, 255, 0.14);
+}
+
+@media (max-width: 768px) {
+  .control-panel {
+    width: 100%;
+    margin: 0 0 var(--spacing-xs);
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    box-sizing: border-box;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .filter-section {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    margin: 0;
+  }
+  .control-panel label {
+    font-size: 0.8rem;
+    text-align: left;
+    color: rgba(248, 250, 252, 0.86);
+    letter-spacing: 0.01em;
+    margin: 0 2px;
+  }
+  .control-panel select {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    margin: 0;
+    padding: 10px 36px 10px 12px;
+    border-radius: 12px;
+    font-size: 0.92rem;
+    background-position: right 10px center;
+    background-size: 13px 8px;
+  }
+}

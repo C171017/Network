@@ -1,6 +1,13 @@
+import type { Database } from "better-sqlite3";
 import type { EdgeDTO, GraphDTO, NodeDTO } from "./graphTypes.js";
+import { persistFollowsEdge, persistNode, type NodeRowInput } from "./graphStore.js";
 
 const API = "https://api.github.com";
+
+/** First `per_page` page of “following” (GitHub order ≈ recently followed first). */
+export const DEFAULT_FOLLOWING_BRANCH = 5;
+/** Expand nodes at depths 0 … maxHopDepth - 1; deepest discovered users sit at `maxHopDepth`. */
+export const DEFAULT_MAX_HOP_DEPTH = 3;
 
 type GithubUserApi = {
   id: number;
@@ -14,18 +21,36 @@ type GithubUserApi = {
   html_url: string;
 };
 
-function toNode(d: GithubUserApi, isRoot: boolean): NodeDTO {
+function toNode(user: GithubUserApi, isRoot: boolean, depth: number, expanded: 0 | 1): NodeDTO {
   return {
-    githubId: d.id,
-    login: d.login,
-    avatarUrl: d.avatar_url,
-    name: d.name,
-    bio: d.bio,
-    company: d.company,
-    location: d.location,
-    websiteUrl: d.blog,
-    profileUrl: d.html_url,
+    githubId: user.id,
+    login: user.login,
+    avatarUrl: user.avatar_url,
+    name: user.name ?? null,
+    bio: user.bio ?? null,
+    company: user.company ?? null,
+    location: user.location ?? null,
+    websiteUrl: user.blog ?? null,
+    profileUrl: user.html_url,
     isRoot,
+    depth,
+    expanded,
+  };
+}
+
+function toNodeRow(n: NodeDTO, depth: number, expanded: 0 | 1): NodeRowInput {
+  return {
+    githubId: n.githubId,
+    login: n.login,
+    depth,
+    expanded,
+    avatarUrl: n.avatarUrl,
+    name: n.name,
+    bio: n.bio,
+    company: n.company,
+    location: n.location,
+    blog: n.websiteUrl,
+    htmlUrl: n.profileUrl,
   };
 }
 
@@ -49,76 +74,76 @@ async function ghFetch<T>(token: string, path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function listUsers(
-  token: string,
-  login: string,
-  kind: "followers" | "following",
-  maxItems: number,
-): Promise<GithubUserApi[]> {
-  const out: GithubUserApi[] = [];
-  for (let page = 1; page <= 20 && out.length < maxItems; page += 1) {
-    const chunk = await ghFetch<GithubUserApi[]>(
-      token,
-      `/users/${encodeURIComponent(login)}/${kind}?per_page=100&page=${page}`,
-    );
-    if (chunk.length === 0) break;
-    for (const u of chunk) {
-      out.push(u);
-      if (out.length >= maxItems) break;
-    }
-    if (chunk.length < 100) break;
-  }
-  return out;
+async function listFollowingFirstN(token: string, login: string, n: number): Promise<GithubUserApi[]> {
+  const chunk = await ghFetch<GithubUserApi[]>(
+    token,
+    `/users/${encodeURIComponent(login)}/following?per_page=${n}&page=1`,
+  );
+  return chunk.slice(0, n);
 }
 
 /**
- * Star graph: edges only between root and first-hop neighbors.
- * Directed "follows": follower -> root for followers; root -> followee for following.
+ * BFS on **following** only: from the root, take the first `branchPerNode` followees per user,
+ * up to graph hop depth `maxHopDepth` (root at 0). Each discovered node and directed `follows`
+ * edge is appended to SQLite (`nodes`, `edges`) for accumulation across requests.
  */
-export async function expandStarGraph(params: {
+export async function expandFollowingDepthGraph(params: {
   token: string;
   rootLogin: string;
-  maxFollowers: number;
-  maxFollowing: number;
+  db: Database;
+  branchPerNode?: number;
+  maxHopDepth?: number;
 }): Promise<GraphDTO> {
-  const { token, rootLogin, maxFollowers, maxFollowing } = params;
+  const { token, rootLogin, db } = params;
+  const branchPerNode = params.branchPerNode ?? DEFAULT_FOLLOWING_BRANCH;
+  const maxHopDepth = params.maxHopDepth ?? DEFAULT_MAX_HOP_DEPTH;
 
-  const root = await ghFetch<GithubUserApi>(
-    token,
-    `/users/${encodeURIComponent(rootLogin)}`,
-  );
-
-  const [followers, following] = await Promise.all([
-    listUsers(token, root.login, "followers", maxFollowers),
-    listUsers(token, root.login, "following", maxFollowing),
-  ]);
+  const rootUser = await ghFetch<GithubUserApi>(token, `/users/${encodeURIComponent(rootLogin)}`);
+  const rootNode = toNode(rootUser, true, 0, 0);
+  persistNode(db, toNodeRow(rootNode, 0, 0));
 
   const nodeById = new Map<number, NodeDTO>();
-  const rootNode = toNode(root, true);
   nodeById.set(rootNode.githubId, rootNode);
 
   const edges: EdgeDTO[] = [];
 
-  for (const f of followers) {
-    const n = toNode(f, false);
-    nodeById.set(n.githubId, n);
-    edges.push({ sourceGithubId: n.githubId, targetGithubId: rootNode.githubId, kind: "follows" });
-  }
-  for (const t of following) {
-    const n = toNode(t, false);
-    nodeById.set(n.githubId, n);
-    edges.push({ sourceGithubId: rootNode.githubId, targetGithubId: n.githubId, kind: "follows" });
+  const queue: Array<{ id: number; login: string; depth: number }> = [
+    { id: rootNode.githubId, login: rootNode.login, depth: 0 },
+  ];
+  const expandedIds = new Set<number>();
+
+  while (queue.length > 0) {
+    const u = queue.shift()!;
+    if (u.depth >= maxHopDepth) continue;
+    if (expandedIds.has(u.id)) continue;
+    expandedIds.add(u.id);
+
+    const following = await listFollowingFirstN(token, u.login, branchPerNode);
+
+    const parentDto = nodeById.get(u.id)!;
+    persistNode(db, toNodeRow(parentDto, u.depth, 1));
+    parentDto.expanded = 1;
+
+    for (const raw of following) {
+      const isNew = !nodeById.has(raw.id);
+      const child = isNew ? toNode(raw, false, u.depth + 1, 0) : nodeById.get(raw.id)!;
+      if (isNew) nodeById.set(child.githubId, child);
+      persistNode(db, toNodeRow(child, u.depth + 1, 0));
+      persistFollowsEdge(db, u.id, child.githubId);
+      edges.push({ sourceGithubId: u.id, targetGithubId: child.githubId, kind: "follows" });
+      queue.push({ id: child.githubId, login: child.login, depth: u.depth + 1 });
+    }
   }
 
   return {
-    rootLogin: root.login,
+    rootLogin: rootNode.login,
     generatedAt: new Date().toISOString(),
-    caps: { maxFollowers, maxFollowing },
+    caps: { maxFollowers: 0, maxFollowing: branchPerNode },
     truncation: {
       followersTotal: null,
       followingTotal: null,
-      followersReturned: followers.length,
-      followingReturned: following.length,
+      followersReturned: 0,
+      followingReturned: edges.length,
     },
     nodes: [...nodeById.values()],
     edges,

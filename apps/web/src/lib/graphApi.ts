@@ -19,6 +19,8 @@ export type GraphDTO = {
     websiteUrl: string | null
     profileUrl: string
     isRoot: boolean
+    depth: number
+    expanded: 0 | 1
   }>
   edges: Array<{
     sourceGithubId: number
@@ -31,7 +33,6 @@ export async function expandGraph(params: {
   supabaseAccessToken: string
   githubAccessToken: string
   rootLogin: string
-  maxFollowers?: number
   maxFollowing?: number
 }): Promise<GraphDTO> {
   const res = await fetch('/api/graph/expand', {
@@ -43,11 +44,14 @@ export async function expandGraph(params: {
     },
     body: JSON.stringify({
       rootLogin: params.rootLogin,
-      maxFollowers: params.maxFollowers ?? 80,
-      maxFollowing: params.maxFollowing ?? 80,
+      maxFollowing: params.maxFollowing ?? 5,
     }),
   })
 
+  return parseGraphResponse(res)
+}
+
+async function parseGraphResponse(res: Response): Promise<GraphDTO> {
   const text = await res.text()
   let json: unknown
   try {
@@ -55,11 +59,27 @@ export async function expandGraph(params: {
   } catch {
     throw new Error(`Non-JSON response (${res.status}): ${text.slice(0, 500)}`)
   }
-
   if (!res.ok) {
     const err = json as { message?: string; error?: string }
     throw new Error(err.message ?? err.error ?? `Request failed (${res.status})`)
   }
-
   return json as GraphDTO
+}
+
+export async function fetchPublicGraph(): Promise<GraphDTO> {
+  const res = await fetch('/api/graph/public')
+  return parseGraphResponse(res)
+}
+
+export async function fetchReachableGraph(params: {
+  supabaseAccessToken: string
+  rootLogin?: string
+}): Promise<GraphDTO> {
+  const q = params.rootLogin?.trim() ? `?rootLogin=${encodeURIComponent(params.rootLogin.trim())}` : ''
+  const res = await fetch(`/api/graph/me${q}`, {
+    headers: {
+      Authorization: `Bearer ${params.supabaseAccessToken}`,
+    },
+  })
+  return parseGraphResponse(res)
 }

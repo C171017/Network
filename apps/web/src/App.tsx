@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
+import NetworkGraph from './components/NetworkGraph'
+import { graphDtoToForceData, type GraphData } from './graph/graphDto'
+import { expandGraph, fetchPublicGraph, fetchReachableGraph } from './lib/graphApi'
 import { supabase, isSupabaseConfigured } from './lib/supabase'
-import { expandGraph } from './lib/graphApi'
-import { NetworkGraph, graphDtoToForceData, type GraphData } from './components/NetworkGraph'
 import './App.css'
 
 type SessionInfo = {
@@ -29,7 +30,9 @@ function readGithubLoginFromUser(user: User): string | null {
 export default function App() {
   const [session, setSession] = useState<SessionInfo | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [graphError, setGraphError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [graphLoading, setGraphLoading] = useState(true)
   const [graph, setGraph] = useState<GraphData | null>(null)
   const [rootOverride, setRootOverride] = useState('')
 
@@ -60,7 +63,6 @@ export default function App() {
     const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
       if (!s?.access_token || !s.user) {
         setSession(null)
-        setGraph(null)
         return
       }
       const gh = s.provider_token
@@ -91,6 +93,39 @@ export default function App() {
 
   const effectiveRoot = (rootOverride.trim() || session?.login || '').trim()
 
+  const refreshGraphFromSql = useCallback(async () => {
+    setGraphLoading(true)
+    setGraphError(null)
+    try {
+      if (!session) {
+        const dto = await fetchPublicGraph()
+        setGraph(graphDtoToForceData(dto))
+      } else {
+        const dto = await fetchReachableGraph({
+          supabaseAccessToken: session.supabaseAccessToken,
+        })
+        setGraph(graphDtoToForceData(dto))
+      }
+    } catch (e) {
+      setGraph(null)
+      setGraphError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setGraphLoading(false)
+    }
+  }, [session])
+
+  useEffect(() => {
+    let cancelled = false
+    const id = window.setTimeout(() => {
+      if (cancelled) return
+      void refreshGraphFromSql()
+    }, 0)
+    return () => {
+      cancelled = true
+      window.clearTimeout(id)
+    }
+  }, [refreshGraphFromSql])
+
   async function signIn() {
     if (!supabase) return
     setError(null)
@@ -107,7 +142,6 @@ export default function App() {
   async function signOut() {
     if (!supabase) return
     setError(null)
-    setGraph(null)
     await supabase.auth.signOut()
     setSession(null)
   }
@@ -117,14 +151,13 @@ export default function App() {
     setLoading(true)
     setError(null)
     try {
-      const dto = await expandGraph({
+      await expandGraph({
         supabaseAccessToken: session.supabaseAccessToken,
         githubAccessToken: session.githubAccessToken,
         rootLogin: effectiveRoot,
       })
-      setGraph(graphDtoToForceData(dto))
+      await refreshGraphFromSql()
     } catch (e) {
-      setGraph(null)
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
@@ -144,70 +177,71 @@ export default function App() {
   }
 
   return (
-    <div className="shell">
-      <header className="top">
-        <div>
-          <h1>Network</h1>
-          <p className="muted">Sign in with GitHub, then load a bounded follow graph.</p>
-        </div>
-        <div className="actions">
-          {!session ? (
-            <button type="button" className="btn primary" onClick={() => void signIn()}>
-              Sign in with GitHub
-            </button>
-          ) : (
-            <>
-              <span className="pill">@{session.login}</span>
-              <button type="button" className="btn" onClick={() => void signOut()}>
-                Sign out
-              </button>
-            </>
-          )}
-        </div>
-      </header>
-
-      {session ? (
-        <section className="controls">
-          <label className="field">
-            <span>Root GitHub login</span>
-            <input
-              value={rootOverride}
-              onChange={(e) => setRootOverride(e.target.value)}
-              placeholder={`default: ${session.login}`}
-              spellCheck={false}
-              autoCapitalize="off"
-              autoCorrect="off"
-            />
-          </label>
-          <button
-            type="button"
-            className="btn primary"
-            disabled={loading || !effectiveRoot}
-            onClick={() => void loadGraph()}
-          >
-            {loading ? 'Loading…' : 'Load graph'}
-          </button>
-        </section>
-      ) : null}
-
+    <div className="app-root-full">
       {error ? (
-        <div className="banner error" role="alert">
+        <div className="banner error app-banner" role="alert">
           {error}
         </div>
       ) : null}
+      {graphError ? (
+        <div className="banner error app-banner" role="alert">
+          {graphError}
+        </div>
+      ) : null}
 
-      <section className="graph">
-        {graph ? (
+      <div className="graph-host">
+        {graph && graph.nodes.length > 0 ? (
           <NetworkGraph data={graph} />
+        ) : graphLoading ? (
+          <div className="graph-placeholder">Loading graph from database…</div>
         ) : (
-          <div className="graph-placeholder">Graph appears here after you click “Load graph”.</div>
+          <div className="graph-placeholder">
+            No nodes in the local graph database yet. Sign in and use &quot;Expand from GitHub&quot; to crawl follows into
+            SQLite.
+          </div>
         )}
-      </section>
+      </div>
 
-      <footer className="footer muted">
-        Dev: run <code>npm run dev:server</code> (API on <code>:8787</code>) and <code>npm run dev</code> (Vite). Vite
-        proxies <code>/api</code> → the API.
-      </footer>
+      <div className="auth-chrome glass-chrome">
+        <div className="chrome-title">Network</div>
+        <p className="chrome-hint">
+          {session ? 'Your view: reachable subgraph from your login.' : 'Public view: all stored nodes and edges.'}
+        </p>
+        {!session ? (
+          <button type="button" className="chrome-btn primary" onClick={() => void signIn()}>
+            Sign in with GitHub
+          </button>
+        ) : (
+          <>
+            <span className="chrome-pill">@{session.login}</span>
+            <button type="button" className="chrome-btn" onClick={() => void signOut()}>
+              Sign out
+            </button>
+            <label className="chrome-field">
+              <span>Root for GitHub crawl</span>
+              <input
+                value={rootOverride}
+                onChange={(e) => setRootOverride(e.target.value)}
+                placeholder={`default: ${session.login}`}
+                spellCheck={false}
+                autoCapitalize="off"
+                autoCorrect="off"
+              />
+            </label>
+            <button
+              type="button"
+              className="chrome-btn primary"
+              disabled={loading || !effectiveRoot}
+              onClick={() => void loadGraph()}
+            >
+              {loading ? 'Expanding…' : 'Expand from GitHub'}
+            </button>
+          </>
+        )}
+        <p className="chrome-footer muted">
+          API <code>:8787</code> · Vite proxies <code>/api</code>
+        </p>
+      </div>
     </div>
   )
 }

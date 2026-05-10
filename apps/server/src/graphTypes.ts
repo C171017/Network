@@ -11,6 +11,10 @@ export type NodeDTO = {
   websiteUrl: string | null;
   profileUrl: string;
   isRoot: boolean;
+  /** Graph hop depth from crawl or SQLite row (legend / color-by). */
+  depth: number;
+  /** 1 if this node had its following list fetched during crawl. */
+  expanded: 0 | 1;
 };
 
 export type EdgeDTO = {
