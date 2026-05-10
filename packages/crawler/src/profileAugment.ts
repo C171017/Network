@@ -10,18 +10,23 @@ export type GithubProfileAugments = {
 };
 
 /**
- * Build the object stored as `nodes.profile_json`: GitHub user payload plus optional extras.
+ * Build the object stored as `nodes.profile_json`: full GitHub `GET /users/{login}` JSON
+ * (all keys preserved) plus `social_accounts` / `organizations` from their list endpoints.
  */
 export function expandProfileRecord(
   user: GithubPublicUser,
   augments?: GithubProfileAugments,
 ): Record<string, unknown> {
   const profile: Record<string, unknown> = { ...(user as unknown as Record<string, unknown>) };
-  if (augments?.social_accounts?.length) {
+  if (augments?.social_accounts != null) {
     profile.social_accounts = augments.social_accounts;
+  } else {
+    delete profile.social_accounts;
   }
-  if (augments?.organizations?.length) {
+  if (augments?.organizations != null) {
     profile.organizations = augments.organizations;
+  } else {
+    delete profile.organizations;
   }
   return profile;
 }

@@ -1,5 +1,6 @@
 import type { Database } from "better-sqlite3";
 import {
+  crawlScalarsFromGithubUser,
   expandProfileRecord,
   type GithubPublicOrganization,
   type GithubPublicUser,
@@ -260,7 +261,8 @@ function toNode(
   };
 }
 
-function toNodeRow(n: NodeDTO, depth: number, expanded: 0 | 1): NodeRowInput {
+function toNodeRow(n: NodeDTO, user: GithubPublicUser, depth: number, expanded: 0 | 1): NodeRowInput {
+  const s = crawlScalarsFromGithubUser(user);
   return {
     githubId: n.githubId,
     login: n.login,
@@ -274,8 +276,25 @@ function toNodeRow(n: NodeDTO, depth: number, expanded: 0 | 1): NodeRowInput {
     blog: n.websiteUrl,
     htmlUrl: n.profileUrl,
     profileJson: n.profile != null ? JSON.stringify(n.profile) : null,
+    twitterUsername: s.twitterUsername,
+    email: s.email,
+    hireable: s.hireable,
+    publicRepos: s.publicRepos,
+    publicGists: s.publicGists,
+    followersCount: s.followersCount,
+    followingCount: s.followingCount,
+    githubCreatedAt: s.githubCreatedAt,
+    githubUpdatedAt: s.githubUpdatedAt,
+    userType: s.userType,
+    siteAdmin: s.siteAdmin,
   };
 }
+
+type NeighborPersistBundle = {
+  dto: NodeDTO;
+  fullUser: GithubPublicUser;
+  profileAugments: { social_accounts: GithubSocialAccount[]; organizations: GithubPublicOrganization[] };
+};
 
 async function mergeNeighborFromGithub(
   token: string,
@@ -283,7 +302,7 @@ async function mergeNeighborFromGithub(
   sideEnriched: Map<number, GithubPublicUser>,
   hopDepth: number,
   nodeById: Map<number, NodeDTO>,
-): Promise<NodeDTO> {
+): Promise<NeighborPersistBundle> {
   const full =
     sideEnriched.get(raw.id) ??
     (await ghFetch<GithubPublicUser>(token, `/users/${encodeURIComponent(raw.login)}`));
@@ -292,7 +311,11 @@ async function mergeNeighborFromGithub(
   const depth = prev ? Math.min(prev.depth, hopDepth + 1) : hopDepth + 1;
   const expanded: 0 | 1 = prev?.expanded ?? 0;
   const isRoot = prev?.isRoot ?? false;
-  return toNode(full, isRoot, depth, expanded, augments);
+  return {
+    dto: toNode(full, isRoot, depth, expanded, augments),
+    fullUser: full,
+    profileAugments: augments,
+  };
 }
 
 /**
@@ -339,7 +362,10 @@ export async function expandFollowingDepthGraph(params: {
     fetchProfileAugments(token, normalizedRoot),
   ]);
   const rootNode = toNode(rootUser, true, 0, 0, rootAugments);
-  persistNode(db, toNodeRow(rootNode, 0, 0));
+  persistNode(db, toNodeRow(rootNode, rootUser, 0, 0), {
+    socialAccounts: rootAugments.social_accounts,
+    organizations: rootAugments.organizations,
+  });
 
   const nodeById = new Map<number, NodeDTO>();
   nodeById.set(rootNode.githubId, rootNode);
@@ -376,7 +402,10 @@ export async function expandFollowingDepthGraph(params: {
     const isRootUser = u.id === rootNode.githubId;
     const parentDto = toNode(freshSelf, isRootUser, u.depth, 1, expandAugments);
     nodeById.set(u.id, parentDto);
-    persistNode(db, toNodeRow(parentDto, parentDto.depth, 1));
+    persistNode(db, toNodeRow(parentDto, freshSelf, parentDto.depth, 1), {
+      socialAccounts: expandAugments.social_accounts,
+      organizations: expandAugments.organizations,
+    });
 
     const [followingPick, followersPick] = await Promise.all([
       collectNeighborsFromSide(
@@ -405,21 +434,27 @@ export async function expandFollowingDepthGraph(params: {
 
     for (const raw of following) {
       const child = await mergeNeighborFromGithub(token, raw, followingPick.enriched, u.depth, nodeById);
-      nodeById.set(child.githubId, child);
-      persistNode(db, toNodeRow(child, child.depth, child.expanded));
-      addFollowsEdge(u.id, child.githubId);
+      nodeById.set(child.dto.githubId, child.dto);
+      persistNode(db, toNodeRow(child.dto, child.fullUser, child.dto.depth, child.dto.expanded), {
+        socialAccounts: child.profileAugments.social_accounts,
+        organizations: child.profileAugments.organizations,
+      });
+      addFollowsEdge(u.id, child.dto.githubId);
       followingReturned += 1;
-      queue.push({ id: child.githubId, login: child.login, depth: u.depth + 1 });
+      queue.push({ id: child.dto.githubId, login: child.dto.login, depth: u.depth + 1 });
     }
 
     for (const raw of followers) {
       // GitHub: raw is a follower of u → raw follows u
       const follower = await mergeNeighborFromGithub(token, raw, followersPick.enriched, u.depth, nodeById);
-      nodeById.set(follower.githubId, follower);
-      persistNode(db, toNodeRow(follower, follower.depth, follower.expanded));
-      addFollowsEdge(follower.githubId, u.id);
+      nodeById.set(follower.dto.githubId, follower.dto);
+      persistNode(db, toNodeRow(follower.dto, follower.fullUser, follower.dto.depth, follower.dto.expanded), {
+        socialAccounts: follower.profileAugments.social_accounts,
+        organizations: follower.profileAugments.organizations,
+      });
+      addFollowsEdge(follower.dto.githubId, u.id);
       followersReturned += 1;
-      queue.push({ id: follower.githubId, login: follower.login, depth: u.depth + 1 });
+      queue.push({ id: follower.dto.githubId, login: follower.dto.login, depth: u.depth + 1 });
     }
   }
 

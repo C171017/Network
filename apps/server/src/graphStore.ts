@@ -1,6 +1,11 @@
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  applyGraphSqlMigrations,
+  persistNodeNormalizedAugments,
+  type PersistNodeAugments,
+} from "@network/crawler";
 import Database from "better-sqlite3";
 
 function ensureProfileJsonColumn(db: Database.Database): void {
@@ -62,6 +67,7 @@ export function openGraphDatabase(dbPath: string): Database.Database {
   `);
 
   ensureProfileJsonColumn(db);
+  applyGraphSqlMigrations(db);
 
   return db;
 }
@@ -80,15 +86,36 @@ export type NodeRowInput = {
   htmlUrl: string;
   /** Stringified `GET /users/{login}` JSON; null for legacy slim rows. */
   profileJson: string | null;
+  twitterUsername: string | null;
+  email: string | null;
+  hireable: number | null;
+  publicRepos: number | null;
+  publicGists: number | null;
+  followersCount: number | null;
+  followingCount: number | null;
+  githubCreatedAt: string | null;
+  githubUpdatedAt: string | null;
+  userType: string | null;
+  siteAdmin: number | null;
 };
 
-export function persistNode(db: Database.Database, row: NodeRowInput): void {
+export function persistNode(
+  db: Database.Database,
+  row: NodeRowInput,
+  crawlAugments?: PersistNodeAugments | null,
+): void {
   const now = new Date().toISOString();
   const stmt = db.prepare(`
     INSERT INTO nodes (
-      github_id, login, depth, expanded, avatar_url, name, bio, company, location, blog, html_url, profile_json, updated_at
+      github_id, login, depth, expanded, avatar_url, name, bio, company, location, blog, html_url, profile_json,
+      twitter_username, email, hireable, public_repos, public_gists, followers_count, following_count,
+      github_created_at, github_updated_at, user_type, site_admin,
+      updated_at
     ) VALUES (
-      @github_id, @login, @depth, @expanded, @avatar_url, @name, @bio, @company, @location, @blog, @html_url, @profile_json, @updated_at
+      @github_id, @login, @depth, @expanded, @avatar_url, @name, @bio, @company, @location, @blog, @html_url, @profile_json,
+      @twitter_username, @email, @hireable, @public_repos, @public_gists, @followers_count, @following_count,
+      @github_created_at, @github_updated_at, @user_type, @site_admin,
+      @updated_at
     )
     ON CONFLICT(github_id) DO UPDATE SET
       depth = MIN(nodes.depth, excluded.depth),
@@ -101,6 +128,17 @@ export function persistNode(db: Database.Database, row: NodeRowInput): void {
       blog = COALESCE(excluded.blog, nodes.blog),
       html_url = COALESCE(excluded.html_url, nodes.html_url),
       profile_json = COALESCE(excluded.profile_json, nodes.profile_json),
+      twitter_username = COALESCE(excluded.twitter_username, nodes.twitter_username),
+      email = COALESCE(excluded.email, nodes.email),
+      hireable = COALESCE(excluded.hireable, nodes.hireable),
+      public_repos = COALESCE(excluded.public_repos, nodes.public_repos),
+      public_gists = COALESCE(excluded.public_gists, nodes.public_gists),
+      followers_count = COALESCE(excluded.followers_count, nodes.followers_count),
+      following_count = COALESCE(excluded.following_count, nodes.following_count),
+      github_created_at = COALESCE(excluded.github_created_at, nodes.github_created_at),
+      github_updated_at = COALESCE(excluded.github_updated_at, nodes.github_updated_at),
+      user_type = COALESCE(excluded.user_type, nodes.user_type),
+      site_admin = COALESCE(excluded.site_admin, nodes.site_admin),
       updated_at = excluded.updated_at
   `);
   stmt.run({
@@ -116,8 +154,20 @@ export function persistNode(db: Database.Database, row: NodeRowInput): void {
     blog: row.blog,
     html_url: row.htmlUrl,
     profile_json: row.profileJson,
+    twitter_username: row.twitterUsername,
+    email: row.email,
+    hireable: row.hireable,
+    public_repos: row.publicRepos,
+    public_gists: row.publicGists,
+    followers_count: row.followersCount,
+    following_count: row.followingCount,
+    github_created_at: row.githubCreatedAt,
+    github_updated_at: row.githubUpdatedAt,
+    user_type: row.userType,
+    site_admin: row.siteAdmin,
     updated_at: now,
   });
+  persistNodeNormalizedAugments(db, row.githubId, crawlAugments);
 }
 
 export function persistFollowsEdge(db: Database.Database, sourceId: number, targetId: number): void {

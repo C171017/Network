@@ -1,4 +1,6 @@
 import Database from "better-sqlite3";
+import { applyGraphSqlMigrations, persistNodeNormalizedAugments } from "./graphSqlSchema.js";
+import { crawlScalarsFromGithubUser } from "./githubUserScalars.js";
 import type { GithubPublicUser, GithubUserSlim } from "./types.js";
 import { expandProfileRecord, type GithubProfileAugments } from "./profileAugment.js";
 
@@ -49,6 +51,7 @@ export function openStore(dbPath: string, options?: OpenStoreOptions): Database.
   `);
 
   ensureProfileJsonColumn(db);
+  applyGraphSqlMigrations(db);
 
   if (options?.reset) {
     db.exec(`DELETE FROM edges; DELETE FROM nodes;`);
@@ -88,11 +91,18 @@ export function markExpandedFullProfile(
 ): void {
   const now = new Date().toISOString();
   const profileJson = JSON.stringify(expandProfileRecord(user, augments));
+  const s = crawlScalarsFromGithubUser(user);
   const stmt = db.prepare(`
     INSERT INTO nodes (
-      github_id, login, depth, expanded, avatar_url, name, bio, company, location, blog, html_url, profile_json, updated_at
+      github_id, login, depth, expanded, avatar_url, name, bio, company, location, blog, html_url, profile_json,
+      twitter_username, email, hireable, public_repos, public_gists, followers_count, following_count,
+      github_created_at, github_updated_at, user_type, site_admin,
+      updated_at
     ) VALUES (
-      @github_id, @login, @depth, 1, @avatar_url, @name, @bio, @company, @location, @blog, @html_url, @profile_json, @updated_at
+      @github_id, @login, @depth, 1, @avatar_url, @name, @bio, @company, @location, @blog, @html_url, @profile_json,
+      @twitter_username, @email, @hireable, @public_repos, @public_gists, @followers_count, @following_count,
+      @github_created_at, @github_updated_at, @user_type, @site_admin,
+      @updated_at
     )
     ON CONFLICT(github_id) DO UPDATE SET
       depth = MIN(nodes.depth, excluded.depth),
@@ -105,6 +115,17 @@ export function markExpandedFullProfile(
       blog = excluded.blog,
       html_url = excluded.html_url,
       profile_json = excluded.profile_json,
+      twitter_username = COALESCE(excluded.twitter_username, nodes.twitter_username),
+      email = COALESCE(excluded.email, nodes.email),
+      hireable = COALESCE(excluded.hireable, nodes.hireable),
+      public_repos = COALESCE(excluded.public_repos, nodes.public_repos),
+      public_gists = COALESCE(excluded.public_gists, nodes.public_gists),
+      followers_count = COALESCE(excluded.followers_count, nodes.followers_count),
+      following_count = COALESCE(excluded.following_count, nodes.following_count),
+      github_created_at = COALESCE(excluded.github_created_at, nodes.github_created_at),
+      github_updated_at = COALESCE(excluded.github_updated_at, nodes.github_updated_at),
+      user_type = COALESCE(excluded.user_type, nodes.user_type),
+      site_admin = COALESCE(excluded.site_admin, nodes.site_admin),
       updated_at = excluded.updated_at
   `);
   stmt.run({
@@ -119,8 +140,25 @@ export function markExpandedFullProfile(
     blog: user.blog,
     html_url: user.html_url,
     profile_json: profileJson,
+    twitter_username: s.twitterUsername,
+    email: s.email,
+    hireable: s.hireable,
+    public_repos: s.publicRepos,
+    public_gists: s.publicGists,
+    followers_count: s.followersCount,
+    following_count: s.followingCount,
+    github_created_at: s.githubCreatedAt,
+    github_updated_at: s.githubUpdatedAt,
+    user_type: s.userType,
+    site_admin: s.siteAdmin,
     updated_at: now,
   });
+  if (augments?.social_accounts != null || augments?.organizations != null) {
+    persistNodeNormalizedAugments(db, user.id, {
+      socialAccounts: augments.social_accounts ?? [],
+      organizations: augments.organizations ?? [],
+    });
+  }
 }
 
 export function insertFollowsEdge(
