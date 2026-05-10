@@ -1144,6 +1144,18 @@ const NetworkGraph = ({
       const golden = Math.PI * (3 - Math.sqrt(5));
       groupOrder.forEach((gi, orderIndex) => {
         const maxCenterDist = Math.max(140, movableLimit - groupR[gi] - PAD);
+        if (orderIndex === 0) {
+          // For the first group there is no overlap constraint yet, so a purely
+          // score-based pick tends to land at radius=0. Start from a random
+          // annulus to avoid deterministic core clamping on initial render.
+          const firstTheta = rng() * 2 * Math.PI;
+          const firstRadius = maxCenterDist * (0.28 + 0.68 * Math.sqrt(rng()));
+          centres[gi] = {
+            x: CIRCLE_CX + firstRadius * Math.cos(firstTheta),
+            y: CIRCLE_CY + firstRadius * Math.sin(firstTheta)
+          };
+          return;
+        }
         let best = null;
         let bestScore = -Infinity;
         const nCandidates = Math.max(36, candidateCount - orderIndex * 5);
@@ -1172,8 +1184,9 @@ const NetworkGraph = ({
             if (gap < 0) overlapPenalty += (-gap) * 1000;
           }
           if (!Number.isFinite(nearestGap)) nearestGap = maxCenterDist;
+          const centerAvoidance = radius;
 
-          const score = nearestGap * 2.5 + wallClearance - overlapPenalty;
+          const score = nearestGap * 2.5 + wallClearance + centerAvoidance * 0.9 - overlapPenalty;
           if (score > bestScore) {
             bestScore = score;
             best = cand;
@@ -2163,10 +2176,14 @@ const NetworkGraph = ({
               if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) anchors.push(p);
             }
             if (!anchors.length) {
-              const j = movableLimit > 90 ? movableLimit * 0.06 : 42;
+              const theta = Math.random() * 2 * Math.PI;
+              const radius = Math.max(
+                42,
+                movableLimit * (0.18 + 0.78 * Math.sqrt(Math.random())),
+              );
               return clampToMovableDisk(
-                CIRCLE_CX + (Math.random() - 0.5) * j,
-                CIRCLE_CY + (Math.random() - 0.5) * j,
+                CIRCLE_CX + radius * Math.cos(theta),
+                CIRCLE_CY + radius * Math.sin(theta),
               );
             }
             let sx = 0;
