@@ -383,6 +383,88 @@ function nodeAvatarUrl(d) {
   return u.length > 0 ? u : '';
 }
 
+/** One shared avatar clip definition in SVG `<defs>`; avoids N per-node defs. */
+const NODE_AVATAR_CLIP_ID = 'node-avatar-clip-shared';
+const NODE_AVATAR_CLIP_URL = `url(#${NODE_AVATAR_CLIP_ID})`;
+
+function stableColorMapsKey(maps: Record<string, Record<string, string>>) {
+  if (!maps || typeof maps !== 'object') return '';
+  return Object.keys(maps)
+    .sort()
+    .map((k) => {
+      const inner = maps[k]!;
+      const pairs = Object.keys(inner)
+        .sort()
+        .map((ik) => `${ik}=${String(inner[ik])}`)
+        .join(',');
+      return `${k}:${pairs}`;
+    })
+    .join('|');
+}
+
+function ensureNodeVisualGroup(nodeGroup: d3.Selection<SVGGElement, unknown, HTMLElement, unknown>) {
+  let visual = nodeGroup.select<SVGGElement>('g.node-visual');
+  if (!visual.empty()) return visual as d3.Selection<SVGGElement, unknown, null, unknown>;
+  const ring = nodeGroup.select('.long-press-ring');
+  if (ring.empty()) {
+    visual = nodeGroup.append('g').attr('class', 'node-visual') as typeof visual;
+    return visual;
+  }
+  return nodeGroup.insert('g', '.long-press-ring').attr('class', 'node-visual') as typeof visual;
+}
+
+/**
+ * Cheap in-place fills when topology/visual mode unchanged (colorBy maps only changed).
+ */
+function applyRecolorNodeVisual(
+  nodeGroup: d3.Selection<SVGGElement, unknown, HTMLElement, unknown>,
+  d: Record<string, unknown>,
+  opts: {
+    colorMaps: Record<string, Record<string, string>>;
+    colorBy: string;
+    createNodePath: (x: Record<string, unknown>) => unknown;
+    getNodeColor: (x: Record<string, unknown>) => string;
+  },
+): boolean {
+  const { colorMaps, colorBy, createNodePath, getNodeColor } = opts;
+  let visualRoot = nodeGroup.select<SVGGElement>('g.node-visual');
+  if (visualRoot.empty()) {
+    return false;
+  }
+  visualRoot = nodeGroup.select<SVGGElement>('g.node-visual');
+  const avatarUrl = nodeAvatarUrl(d);
+  const wantsAvatar = avatarUrl.length > 0;
+  const nodePathInfo = createNodePath(d);
+  const wantsMulti = !wantsAvatar && !!nodePathInfo && nodePathInfo.items.length > 1;
+  const wantsSingle = !wantsAvatar && !wantsMulti;
+
+  const imgSel = visualRoot.select<SVGImageElement>('image.avatar-node');
+  const pieSel = visualRoot.selectAll<SVGPathElement, unknown>('path.pie-slice');
+  const singleSel = visualRoot.select<SVGCircleElement>('circle.single-fill');
+
+  if (wantsAvatar) {
+    if (imgSel.empty()) return false;
+    imgSel.attr('href', avatarUrl).attr('xlink:href', avatarUrl);
+    return true;
+  }
+  if (wantsMulti) {
+    if (pieSel.size() !== nodePathInfo.items.length) return false;
+    const cmap = colorMaps[colorBy] || {};
+    const items = nodePathInfo.items;
+    pieSel.each(function (_p, i) {
+      const item = items[i];
+      d3.select(this).attr('fill', cmap[item] || '#9e9e9e');
+    });
+    return true;
+  }
+  if (wantsSingle) {
+    if (singleSel.empty()) return false;
+    singleSel.attr('fill', getNodeColor(d));
+    return true;
+  }
+  return false;
+}
+
 /////////////////////////////////////////////
 /////////////////////////////////////////////
 // buildGroups function (build groups)
@@ -394,31 +476,28 @@ function renderNodeVisual(nodeGroup, d, nodePathInfo, options) {
     getNodeColor,
     includeHub = false,
     includeDataAttrs = false,
-    simplified = false
+    simplified = false,
   } = options;
+
+  const visualRoot = ensureNodeVisualGroup(nodeGroup);
+  visualRoot.selectAll('*').remove();
 
   const avatarUrl = nodeAvatarUrl(d);
 
   if (avatarUrl) {
-    const clipId = `node-avatar-clip-${d.id}`;
-    nodeGroup.append('defs')
-      .append('clipPath')
-      .attr('id', clipId)
-      .append('circle')
-      .attr('r', NODE_RADIUS)
-      .attr('cx', 0)
-      .attr('cy', 0);
-    const img = nodeGroup
+    const img = visualRoot
       .append('image')
+      .attr('class', 'avatar-node')
       .attr('href', avatarUrl)
+      .attr('xlink:href', avatarUrl)
       .attr('x', -NODE_RADIUS)
       .attr('y', -NODE_RADIUS)
       .attr('width', NODE_RADIUS * 2)
       .attr('height', NODE_RADIUS * 2)
       .attr('preserveAspectRatio', 'xMidYMid slice')
-      .attr('clip-path', `url(#${clipId})`);
+      .attr('clip-path', NODE_AVATAR_CLIP_URL);
     if (includeDataAttrs) img.attr('data-avatar', true);
-    nodeGroup
+    visualRoot
       .append('circle')
       .attr('class', 'node-outline')
       .attr('r', NODE_RADIUS)
@@ -432,23 +511,28 @@ function renderNodeVisual(nodeGroup, d, nodePathInfo, options) {
     items.forEach((item, i) => {
       const startAngle = i * anglePerItem;
       const endAngle = (i + 1) * anglePerItem;
-      const path = nodeGroup
+      const path = visualRoot
         .append('path')
+        .attr('class', 'pie-slice')
         .attr('d', d3.arc().innerRadius(0).outerRadius(NODE_RADIUS).startAngle(startAngle).endAngle(endAngle))
         .attr('fill', colorMap[item] || '#9e9e9e');
       if (includeDataAttrs) path.attr('data-slice', item);
     });
   } else {
-    const circle = nodeGroup.append('circle').attr('r', NODE_RADIUS).attr('fill', getNodeColor(d)).attr('stroke', 'none');
+    const circle = visualRoot
+      .append('circle')
+      .attr('class', 'single-fill')
+      .attr('r', NODE_RADIUS)
+      .attr('fill', getNodeColor(d))
+      .attr('stroke', 'none');
     if (includeDataAttrs) circle.attr('data-single', true);
   }
 
   if (includeHub && !simplified) {
-    nodeGroup.append('circle').attr('class', 'node-hub').attr('r', 6);
+    visualRoot.append('circle').attr('class', 'node-hub').attr('r', 6);
   }
 
-  // Static outer accent ring for stronger node readability without animation cost.
-  nodeGroup
+  visualRoot
     .append('circle')
     .attr('class', 'node-accent-ring')
     .attr('r', NODE_RADIUS + 2.2)
@@ -469,10 +553,8 @@ const ZOOM_MAX_MOBILE = 1;
 
 // Multiplier applied to the computed "fit-to-viewport" initial zoom scale.
 // (1 keeps current behavior; increase >1 to zoom in more initially on mobile/desktop.)
-const INITIAL_ZOOM_MULTIPLIER_DESKTOP = 1.1;
+const INITIAL_ZOOM_MULTIPLIER_DESKTOP = 1.8;
 const INITIAL_ZOOM_MULTIPLIER_MOBILE = 1.0;
-const PAN_MARGIN_X = 30000;
-const PAN_MARGIN_Y = 1200;
 
 // Cluster mode: when zoomed below the viewport-specific threshold, large groups collapse
 // into a single organic "cloud" shape and smaller groups disappear entirely.
@@ -486,6 +568,9 @@ const CLUSTER_EXCLUDED_COLORS = new Set(['#9e9e9e', '#999999', '#808080', 'gray'
 // Keep all groups visually present in normal mode so expands feel additive.
 // Cluster mode still handles far-zoom performance reduction.
 const ENABLE_VIEWPORT_GROUP_CULLING = false;
+
+/** Skip full-screen link glow rasterization beyond this node count (desktop chrome only). */
+const LINK_GLOW_MAX_NODES = 420;
 
 const MOBILE_BREAKPOINT_PX = 768;
 function isMobileViewport() {
@@ -531,40 +616,31 @@ function buildColorClusterCircles(groupNodes, getNodeColor, groupCenter) {
   nodesByColor.forEach((nodes, color) => {
     if (!nodes.length) return;
 
-    let bestDx = 0;
-    let bestDy = 0;
-    let maxDistSq = 0;
-    let midX = nodes[0].x;
-    let midY = nodes[0].y;
-
-    if (nodes.length > 1) {
-      for (let i = 0; i < nodes.length; i += 1) {
-        for (let j = i + 1; j < nodes.length; j += 1) {
-          const dx = nodes[j].x - nodes[i].x;
-          const dy = nodes[j].y - nodes[i].y;
-          const distSq = dx * dx + dy * dy;
-          if (distSq > maxDistSq) {
-            maxDistSq = distSq;
-            bestDx = dx;
-            bestDy = dy;
-            midX = (nodes[i].x + nodes[j].x) / 2;
-            midY = (nodes[i].y + nodes[j].y) / 2;
-          }
-        }
-      }
+    let sx = 0;
+    let sy = 0;
+    for (const n of nodes) {
+      sx += n.x;
+      sy += n.y;
+    }
+    const cxMean = sx / nodes.length;
+    const cyMean = sy / nodes.length;
+    let maxD = 0;
+    for (const n of nodes) {
+      const dx = n.x - cxMean;
+      const dy = n.y - cyMean;
+      const d = Math.hypot(dx, dy);
+      if (d > maxD) maxD = d;
     }
 
-    const furthestDistance = Math.sqrt(bestDx * bestDx + bestDy * bestDy);
-    const rawRadius = furthestDistance / 2;
-    const radius = Math.max(MIN_CLUSTER_COLOR_RADIUS, rawRadius);
+    const radius = Math.max(MIN_CLUSTER_COLOR_RADIUS, maxD);
     const area = Math.max(MIN_CLUSTER_AREA, Math.PI * radius * radius);
     const density = nodes.length / area;
 
     circles.push({
       color,
       count: nodes.length,
-      cx: midX - groupCenter.x,
-      cy: midY - groupCenter.y,
+      cx: cxMean - groupCenter.x,
+      cy: cyMean - groupCenter.y,
       radius,
       density
     });
@@ -598,6 +674,21 @@ const BACKGROUND_IMAGE_SIZE = CIRCLE_DIAMETER * 2.1;
  *  Negative Y nudges the artwork upward (SVG Y axis points down). */
 const BACKGROUND_IMAGE_OFFSET_X = -CIRCLE_DIAMETER * -0.024;
 const BACKGROUND_IMAGE_OFFSET_Y = -CIRCLE_DIAMETER * 0.018;
+const BACKGROUND_IMAGE_X = CIRCLE_CX - BACKGROUND_IMAGE_SIZE / 2 + BACKGROUND_IMAGE_OFFSET_X;
+const BACKGROUND_IMAGE_Y = CIRCLE_CY - BACKGROUND_IMAGE_SIZE / 2 + BACKGROUND_IMAGE_OFFSET_Y;
+const BACKGROUND_IMAGE_MAX_X = BACKGROUND_IMAGE_X + BACKGROUND_IMAGE_SIZE;
+const BACKGROUND_IMAGE_MAX_Y = BACKGROUND_IMAGE_Y + BACKGROUND_IMAGE_SIZE;
+
+/**
+ * Pan inset inside the background image rectangle (world units). The cosmos art reads with
+ * darker bands at the top/bottom when panned extreme; narrowing Y stops those from occupying the view.
+ */
+const BACKGROUND_PAN_INSET_Y_TOP = BACKGROUND_IMAGE_SIZE * 0.06;
+const BACKGROUND_PAN_INSET_Y_BOTTOM = BACKGROUND_IMAGE_SIZE * 0.06;
+const BACKGROUND_PAN_EXTENT_WORLD = [
+  [BACKGROUND_IMAGE_X, BACKGROUND_IMAGE_Y + BACKGROUND_PAN_INSET_Y_TOP],
+  [BACKGROUND_IMAGE_MAX_X, BACKGROUND_IMAGE_MAX_Y - BACKGROUND_PAN_INSET_Y_BOTTOM]
+];
 
 /** Widen the logo’s dark zone vs panel math so blackback kicks in at the edge of the ramp, not only when fully black. */
 const LOGO_DARK_DISK_RADIUS_FACTOR = 1.06;
@@ -651,6 +742,8 @@ const NetworkGraph = ({
   const graphLiveApiRef = useRef(null);
   /** Last props topology signature applied by incremental patch / rebuild — avoids pointless work each render. */
   const renderedTopologySigRef = useRef('');
+  /** Stable stringify of categorical color mappings — skips setState churn on streaming redraws when mapping unchanged. */
+  const colorMapsKeyRef = useRef('');
 
   useEffect(() => {
     const hoverEl = hoverStatusRef.current;
@@ -667,14 +760,18 @@ const NetworkGraph = ({
 
 // 5. Color-map generation useEffect
 
-  // Build one `colorMaps[key] = { value→color }` map for *all* keys in one pass
   useEffect(() => {
     const nodes = data.nodes;
     if (!nodes?.length) {
-        setColorMaps({});
+      colorMapsKeyRef.current = '';
+      setColorMaps((prev) => (Object.keys(prev).length === 0 ? prev : {}));
       return;
     }
-    setColorMaps(buildColorMaps(nodes));
+    const nextMaps = buildColorMaps(nodes);
+    const key = stableColorMapsKey(nextMaps);
+    if (key === colorMapsKeyRef.current) return;
+    colorMapsKeyRef.current = key;
+    setColorMaps(nextMaps);
   }, [data]);
 
 
@@ -726,10 +823,7 @@ const NetworkGraph = ({
 
     const zoom = d3.zoom()
       .scaleExtent([ZOOM_MIN, ZOOM_MAX])
-      .translateExtent([
-        [CIRCLE_CX - CANVAS_BACKDROP_RADIUS - PAN_MARGIN_X, CIRCLE_CY - CANVAS_BACKDROP_RADIUS - PAN_MARGIN_Y],
-        [CIRCLE_CX + CANVAS_BACKDROP_RADIUS + PAN_MARGIN_X, CIRCLE_CY + CANVAS_BACKDROP_RADIUS + PAN_MARGIN_Y]
-      ])
+      .translateExtent(BACKGROUND_PAN_EXTENT_WORLD)
       .on('zoom', (event) => {
         g.attr('transform', event.transform);
         onTransformChange?.(event.transform);
@@ -917,9 +1011,12 @@ const NetworkGraph = ({
     persistedZoomTransformRef.current = null;
 
     if (!svgRef.current || !dataset?.nodes?.length) return undefined;
+    const nodeCountHeavy = dataset.nodes.length;
     const isMobile = isMobileViewport();
     const isDesktopSafari = isDesktopSafariBrowser();
     const enableHeavySvgEffects = !isMobile && !isDesktopSafari;
+    const enableLinkGlow =
+      enableHeavySvgEffects && nodeCountHeavy <= LINK_GLOW_MAX_NODES;
 
     if (zoomCleanupRef.current) {
       zoomCleanupRef.current();
@@ -933,6 +1030,9 @@ const NetworkGraph = ({
     let longPressTeardown = null;
     /** Assigned inside try once helpers exist; cleanup always calls a safe no-op if render failed. */
     let teardownGroupMiniSimOnly = () => {};
+    /** Runs after helpers like `applyGroupCulling` are defined — post-layout HUD refresh once sim ends. */
+    let runAfterSimulationLayoutEnd = () => {};
+    let hoverPlacementRaf = null;
     try {
       const containerWidth = svgRef.current.parentElement.clientWidth || 800;
       const containerHeight = window.innerHeight * 0.7 || 600;
@@ -959,6 +1059,13 @@ const NetworkGraph = ({
         .attr('cx', CIRCLE_CX)
         .attr('cy', CIRCLE_CY)
         .attr('r', CIRCLE_RADIUS);
+
+      defs.append('clipPath')
+        .attr('id', NODE_AVATAR_CLIP_ID)
+        .append('circle')
+        .attr('r', NODE_RADIUS)
+        .attr('cx', 0)
+        .attr('cy', 0);
 
       const R_grad = CANVAS_BACKDROP_RADIUS;
       const H = CANVAS_EDGE_FEATHER_HALF;
@@ -1037,7 +1144,7 @@ const NetworkGraph = ({
       // No arrowhead marker: each link is rendered as a tapered wedge
       // (linkWedgePath in ./geometry) whose shape itself encodes direction.
 
-      if (enableHeavySvgEffects) {
+      if (enableLinkGlow) {
         // Soft halo around link wedges — applied to the active link layer
         // so links read as luminous filaments rather than flat polygons.
         const linkGlow = defs.append('filter')
@@ -1083,8 +1190,8 @@ const NetworkGraph = ({
         .attr('class', 'canvas-background-image')
         .attr('href', BACKGROUND_IMAGE_URL)
         .attr('xlink:href', BACKGROUND_IMAGE_URL)
-        .attr('x', CIRCLE_CX - BACKGROUND_IMAGE_SIZE / 2 + BACKGROUND_IMAGE_OFFSET_X)
-        .attr('y', CIRCLE_CY - BACKGROUND_IMAGE_SIZE / 2 + BACKGROUND_IMAGE_OFFSET_Y)
+        .attr('x', BACKGROUND_IMAGE_X)
+        .attr('y', BACKGROUND_IMAGE_Y)
         .attr('width', BACKGROUND_IMAGE_SIZE)
         .attr('height', BACKGROUND_IMAGE_SIZE)
         .attr('preserveAspectRatio', 'xMidYMid slice')
@@ -1285,6 +1392,7 @@ const NetworkGraph = ({
         .alphaDecay(0.1) // controls cooldown speed
         .on('end', () => {
           simulation.stop(); // freeze after global layout settles
+          runAfterSimulationLayoutEnd();
         });
 
       live.nodes.forEach((n) => {
@@ -1316,7 +1424,7 @@ const NetworkGraph = ({
       // layers (detached from visible world) and reattached when needed.
       const activeLinkLayer = world.append('g')
         .attr('class', 'link-layer-active')
-        .attr('filter', enableHeavySvgEffects ? 'url(#link-glow)' : null);
+        .attr('filter', enableLinkGlow ? 'url(#link-glow)' : null);
       const activeNodeLayer = world.append('g').attr('class', 'node-layer-active');
       const activeClusterLayer = world.append('g').attr('class', 'cluster-layer-active');
       const parkedRoot = g.append('g')
@@ -1753,6 +1861,11 @@ const NetworkGraph = ({
         applyViewportHighlightClasses();
       };
 
+      runAfterSimulationLayoutEnd = () => {
+        applyGroupCulling();
+        updateUiSurfaceTheme();
+      };
+
       const { zoom, cleanup: cleanupZoom } = setupZoom(
         svg,
         g,
@@ -1806,7 +1919,9 @@ const NetworkGraph = ({
         }
       });
 
-      const placeHoverNearPointer = (event) => {
+      let pendingHoverEvent = null;
+
+      const placeHoverNearPointerNow = (event) => {
         const el = hoverStatusRef.current;
         if (!el) return;
         const pad = 8;
@@ -1835,6 +1950,17 @@ const NetworkGraph = ({
         el.style.top = `${top}px`;
       };
 
+      const scheduleHoverNearPointerMove = (event) => {
+        pendingHoverEvent = event;
+        if (hoverPlacementRaf != null) return;
+        hoverPlacementRaf = window.requestAnimationFrame(() => {
+          hoverPlacementRaf = null;
+          const ev = pendingHoverEvent;
+          pendingHoverEvent = null;
+          if (ev) placeHoverNearPointerNow(ev);
+        });
+      };
+
       const hoverInfoEnabled = supportsHoverInfo();
       if (hoverInfoEnabled) {
         node
@@ -1843,12 +1969,12 @@ const NetworkGraph = ({
             if (!el) return;
             renderNodeHoverPanel(el, d);
             el.style.display = 'block';
-            placeHoverNearPointer(event);
+            placeHoverNearPointerNow(event);
           })
           .on('mousemove', (event) => {
             const el = hoverStatusRef.current;
             if (!el || el.style.display === 'none') return;
-            placeHoverNearPointer(event);
+            scheduleHoverNearPointerMove(event);
           })
           .on('mouseout', (event) => {
             const el = hoverStatusRef.current;
@@ -2030,9 +2156,6 @@ const NetworkGraph = ({
         node
           .filter(d => visibleGroups.has(d.__groupIndex))
           .attr('transform', d => `translate(${d.x},${d.y})`);
-
-        applyGroupCulling();
-        updateUiSurfaceTheme();
       });
 
       updateUiSurfaceTheme();
@@ -2386,12 +2509,12 @@ const NetworkGraph = ({
                 if (!el) return;
                 renderNodeHoverPanel(el, d);
                 el.style.display = 'block';
-                placeHoverNearPointer(event);
+                placeHoverNearPointerNow(event);
               })
               .on('mousemove', (event) => {
                 const el = hoverStatusRef.current;
                 if (!el || el.style.display === 'none') return;
-                placeHoverNearPointer(event);
+                scheduleHoverNearPointerMove(event);
               })
               .on('mouseout', (event) => {
                 const el = hoverStatusRef.current;
@@ -2418,9 +2541,10 @@ const NetworkGraph = ({
 
           linkForce.links(resolved);
           simulation.nodes(merged);
-          simulation.alpha(0.32).restart();
+          simulation.alpha(0.09).restart();
 
-          visibleGroups = new Set();
+          applyGroupCulling();
+          updateUiSurfaceTheme();
           renderedTopologySigRef.current = topologySignature(live.nodes, live.links ?? []);
           return true;
         },
@@ -2431,6 +2555,10 @@ const NetworkGraph = ({
     }
 
     return () => {
+      if (hoverPlacementRaf != null) {
+        window.cancelAnimationFrame(hoverPlacementRaf);
+        hoverPlacementRaf = null;
+      }
       svgRef.current?.classList.remove('network-graph--node-dragging');
       if (nodeClickTimer != null) {
         clearTimeout(nodeClickTimer);
@@ -2481,63 +2609,74 @@ const NetworkGraph = ({
   }, [data, authenticatedSession]);
 
 
-  // Lightweight recolor effect
-
+  /** Recolor-only: avoids tearing down avatar/images on every streamed `data` tick. Uses latest merged graph snapshot. */
   useEffect(() => {
-    if (!svgRef.current || !colorMaps || !data?.nodes?.length) return;
+    const graphData = latestGraphDataRef.current;
+    if (!svgRef.current || !graphData?.nodes?.length || !colorMaps || Object.keys(colorMaps).length === 0) {
+      return undefined;
+    }
 
-    const groupMap = buildGroupsFromData(data.nodes, data.links ?? []);
-    const vals = [...groupMap.values()];
-    const groupCount = vals.length ? Math.max(...vals) + 1 : 0;
-    const groupSizes = Array.from({ length: groupCount }, () => 0);
-    data.nodes.forEach(n => { groupSizes[groupMap.get(n.id)] += 1; });
+    const groupMap = buildGroupsFromData(graphData.nodes, graphData.links ?? []);
 
     const g = d3.select(svgRef.current).select('g');
 
-    g.selectAll('.node').each(function (d) {
+    g.selectAll('.node').each(function redrawNodeDatum(d) {
       const nodeGroup = d3.select(this);
+      const ok = applyRecolorNodeVisual(nodeGroup, d, {
+        colorMaps,
+        colorBy,
+        createNodePath,
+        getNodeColor,
+      });
+
+      if (ok) {
+        return;
+      }
+
+      nodeGroup.select('g.node-visual').remove();
+      nodeGroup
+        .selectAll('path, image, defs, circle:not(.long-press-ring)')
+        .remove();
       const nodePathInfo = createNodePath(d);
-
-      nodeGroup.selectAll('path').remove();
-      nodeGroup.selectAll('circle').remove();
-      nodeGroup.selectAll('image').remove();
-      nodeGroup.selectAll('defs').remove();
-
       renderNodeVisual(nodeGroup, d, nodePathInfo, {
         colorMaps,
         colorBy,
         getNodeColor,
         includeHub: false,
-        includeDataAttrs: true
       });
-
-      // Re-add the long-press progress ring (removed by the wipe above).
-      nodeGroup.append('circle')
-        .attr('class', 'long-press-ring')
-        .attr('r', NODE_RADIUS + 6)
-        .attr('fill', 'none')
-        .attr('pointer-events', 'none')
-        .style('display', 'none');
+      if (nodeGroup.select('.long-press-ring').empty()) {
+        nodeGroup
+          .append('circle')
+          .attr('class', 'long-press-ring')
+          .attr('r', NODE_RADIUS + 6)
+          .attr('fill', 'none')
+          .attr('pointer-events', 'none')
+          .style('display', 'none');
+      }
     });
 
-    // Rebuild cluster contents so the cloud blob's color mix reflects the
-    // newly-selected colorBy. Cluster <g>s were created lazily by the main
-    // effect for groups with size >= CLUSTER_GROUP_MIN_NODES.
-    g.selectAll('.cluster').each(function () {
+    g.selectAll('.cluster').each(function redrawClusterDatum() {
       const clusterSel = d3.select(this);
       const gi = Number(clusterSel.attr('data-gi'));
       if (!Number.isFinite(gi)) return;
-      const groupNodes = data.nodes.filter(n => groupMap.get(n.id) === gi);
+      const groupNodes = [];
+      graphData.nodes.forEach((n) => {
+        if (groupMap.get(n.id) === gi) groupNodes.push(n);
+      });
       if (!groupNodes.length) return;
 
+      const sx = groupNodes.reduce((sum, n) => sum + n.x, 0);
+      const sy = groupNodes.reduce((sum, n) => sum + n.y, 0);
       const center = {
-        x: groupNodes.reduce((sum, n) => sum + n.x, 0) / groupNodes.length,
-        y: groupNodes.reduce((sum, n) => sum + n.y, 0) / groupNodes.length
+        x: sx / groupNodes.length,
+        y: sy / groupNodes.length,
       };
       const circles = buildColorClusterCircles(groupNodes, getNodeColor, center);
       renderClusterContentsFromModule(clusterSel, circles);
     });
-  }, [colorBy, colorMaps, getNodeColor, createNodePath, data]);
+
+    return undefined;
+  }, [colorBy, colorMaps, getNodeColor, createNodePath]);
 
   const desktopSafariClass = isDesktopSafariBrowser() ? ' desktop-safari' : '';
   const showControlsAndLegend = authenticatedSession;
