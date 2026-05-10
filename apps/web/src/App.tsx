@@ -71,6 +71,36 @@ function buildSeedGraphDto(login: string): GraphDTO {
   }
 }
 
+function mergeGraphDataAdditive(
+  existing: GraphData | null,
+  incoming: GraphData,
+): GraphData {
+  if (!existing) return incoming
+
+  const nodeById = new Map<number, GraphData['nodes'][number]>()
+  for (const n of existing.nodes) nodeById.set(n.id, n)
+  for (const n of incoming.nodes) {
+    const prev = nodeById.get(n.id)
+    nodeById.set(n.id, prev ? { ...prev, ...n } : n)
+  }
+
+  const mergedLinks: GraphData['links'] = []
+  const seen = new Set<string>()
+  const pushLink = (l: GraphData['links'][number]) => {
+    const key = `${l.source}->${l.target}`
+    if (seen.has(key)) return
+    seen.add(key)
+    mergedLinks.push(l)
+  }
+  for (const l of existing.links) pushLink(l)
+  for (const l of incoming.links) pushLink(l)
+
+  return {
+    nodes: [...nodeById.values()],
+    links: mergedLinks,
+  }
+}
+
 export default function App() {
   const [session, setSession] = useState<SessionInfo | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -309,7 +339,8 @@ export default function App() {
           rootLogin: target,
           throttleMs: DEFAULT_EXPAND_STREAM_THROTTLE_MS,
           onGraph: (dto) => {
-            setGraph(graphDtoToForceData(dto))
+            const incoming = graphDtoToForceData(dto)
+            setGraph((prev) => mergeGraphDataAdditive(prev, incoming))
           },
         })
         await refreshGraphFromSql({ suppressLoadingSpinner: true })
