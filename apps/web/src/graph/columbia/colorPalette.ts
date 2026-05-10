@@ -1,20 +1,17 @@
 /** Categorical colors, top-to-bottom order maps to value index 0, 1, 2, … */
 export const COLOR_PALETTE = [
-  '#FF0000',
-  '#FF0099',
-  '#FF6000',
-  '#FF9900',
-  '#FFCC00',
-  '#FFFF00',
-  '#99FF00',
-  '#33FF00',
-  '#00FF66',
-  '#00FFCC',
-  '#00FFFF',
-  '#0099FF',
-  '#0033FF',
-  '#6600FF',
-  '#CC00FF',
+  '#FF0000', // Red
+  '#00D5D5', // Cyan
+  '#FF7F00', // Orange
+  '#0033FF', // Blue
+  '#FFD300', // Yellow
+  '#7A00FF', // Violet
+  '#7FFF00', // Lime
+  '#FF1493', // Pink
+  '#00CC44', // Green
+  '#CC00FF', // Magenta
+  '#0099FF', // Sky Blue
+  '#8B5A2B', // Brown
 ] as const
 
 /** Used when there are more distinct values than entries in `COLOR_PALETTE`. */
