@@ -586,6 +586,16 @@ const VISUAL_SCENE_EXTENT = CIRCLE_DIAMETER + 2 * CANVAS_EDGE_FEATHER_HALF;
 const CANVAS_WHITE_INSET = 1300;
 const CANVAS_WHITE_OUTER_RADIUS = Math.max(0, CIRCLE_RADIUS - CANVAS_EDGE_FEATHER_HALF - CANVAS_WHITE_INSET);
 
+// Decorative background image (rendered inside the zoom group so it pans/zooms
+// with the graph). Tune these three numbers to align the artwork with the disk.
+const BACKGROUND_IMAGE_URL = '/background.png';
+/** Image width in world units. Larger = bigger image. ~3× the canvas diameter
+ *  by default so the artwork extends comfortably past the visible viewport. */
+const BACKGROUND_IMAGE_SIZE = CIRCLE_DIAMETER * 3.0;
+/** Center offsets in world units; (0, 0) centers the image on the canvas. */
+const BACKGROUND_IMAGE_OFFSET_X = 0;
+const BACKGROUND_IMAGE_OFFSET_Y = 0;
+
 /** Widen the logo’s dark zone vs panel math so blackback kicks in at the edge of the ramp, not only when fully black. */
 const LOGO_DARK_DISK_RADIUS_FACTOR = 1.06;
 
@@ -1062,6 +1072,20 @@ const NetworkGraph = ({
 
       // Create a group for the visualization (zoom target)
       const g = svg.append('g');
+
+      // Decorative background image. Lives inside the zoom group `g` so panning
+      // and zooming the graph keep the artwork locked to the canvas.
+      // Sits behind the canvas-backdrop gradient and the network world.
+      g.append('image')
+        .attr('class', 'canvas-background-image')
+        .attr('href', BACKGROUND_IMAGE_URL)
+        .attr('xlink:href', BACKGROUND_IMAGE_URL)
+        .attr('x', CIRCLE_CX - BACKGROUND_IMAGE_SIZE / 2 + BACKGROUND_IMAGE_OFFSET_X)
+        .attr('y', CIRCLE_CY - BACKGROUND_IMAGE_SIZE / 2 + BACKGROUND_IMAGE_OFFSET_Y)
+        .attr('width', BACKGROUND_IMAGE_SIZE)
+        .attr('height', BACKGROUND_IMAGE_SIZE)
+        .attr('preserveAspectRatio', 'xMidYMid slice')
+        .attr('pointer-events', 'none');
 
       g.append('g')
         .attr('class', 'canvas-backdrop')

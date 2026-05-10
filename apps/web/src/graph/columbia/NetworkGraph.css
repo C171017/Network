@@ -27,7 +27,9 @@
   position: relative;
   touch-action: none;
   user-select: none;
-  background: #fff;
+  /* Transparent so the page-level backdrop (e.g. .app-background image) shows
+     through outside the SVG's circular gradient. */
+  background: transparent;
 }
 
 .control-panel {
@@ -46,7 +48,9 @@
 
 .network-graph {
   flex: 1;
-  background: #fff;
+  /* Transparent so the page-level backdrop (e.g. .app-background image) shows
+     through the SVG's transparent corners (outside the radial gradient circle). */
+  background: transparent;
   cursor: default;
   position: relative;
   z-index: 2;
